@@ -62,3 +62,24 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Virtual environments
+myenv/
+venv/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
+
+# Qdrant data
+qdrant_storage/
