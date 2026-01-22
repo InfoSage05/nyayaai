@@ -30,19 +30,23 @@ class NyayaOrchestrator:
     
     def __init__(self):
         """Initialize orchestrator with all agents."""
-        self.intake_agent = IntakeAgent()
-        self.classification_agent = ClassificationAgent()
-        self.knowledge_agent = KnowledgeRetrievalAgent()
-        self.case_agent = CaseSimilarityAgent()
-        self.reasoning_agent = ReasoningAgent()
-        self.recommendation_agent = RecommendationAgent()
-        self.ethics_agent = EthicsAgent()
-        self.memory_agent = MemoryAgent()
-        self.summarization_agent = SummarizationAgent()
-        
-        # Build graph
-        self.graph = self._build_graph()
-        self.app = self.graph.compile()
+        try:
+            self.intake_agent = IntakeAgent()
+            self.classification_agent = ClassificationAgent()
+            self.knowledge_agent = KnowledgeRetrievalAgent()
+            self.case_agent = CaseSimilarityAgent()
+            self.reasoning_agent = ReasoningAgent()
+            self.recommendation_agent = RecommendationAgent()
+            self.ethics_agent = EthicsAgent()
+            self.memory_agent = MemoryAgent()
+            self.summarization_agent = SummarizationAgent()
+            
+            # Build graph
+            self.graph = self._build_graph()
+            self.app = self.graph.compile()
+        except Exception as e:
+            logger.error(f"Error initializing orchestrator: {e}", exc_info=True)
+            raise
     
     def _build_graph(self) -> StateGraph:
         """Build LangGraph workflow."""
@@ -490,5 +494,27 @@ class NyayaOrchestrator:
             }
 
 
-# Global orchestrator instance
-orchestrator = NyayaOrchestrator()
+# Global orchestrator instance - lazy initialization to prevent crashes on import
+_orchestrator_instance = None
+
+def get_orchestrator() -> NyayaOrchestrator:
+    """Get or create the global orchestrator instance."""
+    global _orchestrator_instance
+    if _orchestrator_instance is None:
+        try:
+            _orchestrator_instance = NyayaOrchestrator()
+        except Exception as e:
+            logger.error(f"Failed to initialize orchestrator: {e}", exc_info=True)
+            raise
+    return _orchestrator_instance
+
+# For backward compatibility - lazy initialization to prevent crashes
+# Don't initialize at import time - wait until first API call
+orchestrator = None
+
+def _init_orchestrator():
+    """Initialize orchestrator on first use (called from API endpoints)."""
+    global orchestrator
+    if orchestrator is None:
+        orchestrator = get_orchestrator()
+    return orchestrator

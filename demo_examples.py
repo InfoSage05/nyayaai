@@ -1,5 +1,5 @@
 """Demo examples for NyayaAI."""
-from core.orchestrator import orchestrator
+from core.orchestrator import _init_orchestrator
 
 # Sample queries for demonstration
 DEMO_QUERIES = [
@@ -20,6 +20,7 @@ def run_demo(query: str):
     print(f"Query: {query}")
     print(f"{'='*80}\n")
     
+    orchestrator = _init_orchestrator()
     result = orchestrator.process_query(query)
     
     print(f"Domains: {result.get('domains', [])}")

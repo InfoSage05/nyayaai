@@ -1,7 +1,6 @@
 """Streamlit frontend for NyayaAI."""
 import streamlit as st
 import requests
-import json
 from typing import Dict, Any
 
 # Page config

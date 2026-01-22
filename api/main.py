@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from config.settings import settings
-from core.orchestrator import orchestrator
+# Orchestrator is initialized lazily via _init_orchestrator() in endpoints
 from database.qdrant_client import qdrant_manager
 from api.schemas import (
     QueryRequest, QueryResponse, MemoryRequest, MemoryResponse, 
@@ -73,6 +73,11 @@ async def process_query_structured(request: QueryRequest):
     try:
         logger.info(f"Processing structured query: {request.query[:100]}...")
         
+        # Ensure orchestrator is initialized
+        from core.orchestrator import _init_orchestrator
+        global orchestrator
+        orchestrator = _init_orchestrator()
+        
         result = orchestrator.process_query_structured(
             query=request.query,
             user_id=request.user_id or "anonymous"
@@ -123,6 +128,11 @@ async def process_query(request: QueryRequest):
     """
     try:
         logger.info(f"Processing query (legacy): {request.query[:100]}...")
+        
+        # Ensure orchestrator is initialized
+        from core.orchestrator import _init_orchestrator
+        global orchestrator
+        orchestrator = _init_orchestrator()
         
         result = orchestrator.process_query(
             query=request.query,
