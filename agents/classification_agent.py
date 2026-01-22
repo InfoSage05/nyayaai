@@ -3,6 +3,11 @@ from typing import Dict, Any, List
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
 from database.qdrant_client import qdrant_manager
 from utils.embeddings import get_embedding
+from llm.groq_client import groq_llm
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Legal domain taxonomy
 LEGAL_DOMAINS = [
@@ -49,36 +54,50 @@ class ClassificationAgent(BaseAgent):
                 agent_name=self.name
             )
         
-        # Get embedding from context or generate new
-        context = input_data.context or {}
-        if "embedding" in context:
-            query_embedding = context["embedding"]
-        else:
-            query_embedding = get_embedding(input_data.query)
+        # Step 1: Try LLM-based classification first
+        self.logger.info("Attempting LLM-based classification...")
+        classified_domains = self._llm_classify(input_data.query)
+        classification_method = "llm"
+        results = []
+        confidence = 0.5
         
-        # Search legal taxonomy collection
-        results = qdrant_manager.search(
-            collection_name="legal_taxonomy_vectors",
-            query_vector=query_embedding,
-            limit=3,
-            score_threshold=0.4
-        )
-        
-        self.log_retrieval("legal_taxonomy_vectors", len(results), 0.4)
-        
-        # Extract domains from retrieved taxonomy
-        classified_domains = []
-        if results:
-            for result in results:
-                domain = result["payload"].get("domain", "")
-                if domain and domain not in classified_domains:
-                    classified_domains.append(domain)
-        
-        # Fallback: use keyword matching if no taxonomy match
+        # Step 2: If LLM fails, try taxonomy search
         if not classified_domains:
-            classified_domains = self._keyword_classify(input_data.query)
+            self.logger.info("LLM classification failed, trying taxonomy search...")
+            context = input_data.context or {}
+            if "embedding" in context:
+                query_embedding = context["embedding"]
+            else:
+                query_embedding = get_embedding(input_data.query)
+            
+            results = qdrant_manager.search(
+                collection_name="legal_taxonomy_vectors",
+                query_vector=query_embedding,
+                limit=3,
+                score_threshold=0.4
+            )
+            
+            self.log_retrieval("legal_taxonomy_vectors", len(results), 0.4)
+            
+            # Extract domains from retrieved taxonomy
+            if results:
+                for result in results:
+                    domain = result["payload"].get("domain", "")
+                    if domain and domain not in classified_domains:
+                        classified_domains.append(domain)
+                classification_method = "taxonomy"
+                confidence = results[0]["score"] if results else 0.5
         
-        confidence = results[0]["score"] if results else 0.5
+        # Step 3: Final fallback to keyword matching
+        if not classified_domains:
+            self.logger.info("Taxonomy search failed, using keyword matching fallback...")
+            classified_domains = self._keyword_classify(input_data.query)
+            classification_method = "keyword"
+            confidence = 0.5
+        
+        # If LLM was used, set higher confidence
+        if classification_method == "llm":
+            confidence = 0.85
         
         return AgentOutput(
             result={
@@ -87,11 +106,12 @@ class ClassificationAgent(BaseAgent):
             },
             retrieved_documents=results,
             confidence=float(confidence),
-            reasoning=f"Classified into {len(classified_domains)} domain(s) using taxonomy search",
+            reasoning=f"Classified into {len(classified_domains)} domain(s) using {classification_method}",
             agent_name=self.name,
             metadata={
-                "taxonomy_results_count": len(results),
-                "fallback_used": len(results) == 0
+                "classification_method": classification_method,
+                "llm_used": classification_method == "llm",
+                "fallback_used": classification_method in ["taxonomy", "keyword"]
             }
         )
     
@@ -122,3 +142,76 @@ class ClassificationAgent(BaseAgent):
                 matched_domains.append(domain)
         
         return matched_domains[:3]  # Return top 3 matches
+    
+    def _llm_classify(self, query: str) -> List[str]:
+        """Use LLM to classify query into legal domains.
+        
+        Args:
+            query: User query string
+            
+        Returns:
+            List of classified domain names
+        """
+        if groq_llm is None:
+            self.logger.warning("Groq LLM not available for classification")
+            return []
+        
+        try:
+            domains_list = ", ".join(LEGAL_DOMAINS)
+            
+            system_prompt = """You are a legal domain classification expert. Your task is to classify legal queries into appropriate legal domains.
+
+Available domains: """ + domains_list + """
+
+Return ONLY a JSON array of domain names that best match the query. Return 1-3 most relevant domains.
+Example: ["consumer_protection", "civic_rights"]"""
+
+            user_prompt = f"""Classify this legal query into the most appropriate legal domain(s):
+
+Query: {query}
+
+Return a JSON array of domain names (1-3 domains). Only use domains from the available list."""
+
+            result = groq_llm.generate_response(
+                prompt=f"{system_prompt}\n\n{user_prompt}",
+                temperature=0.2,
+                max_tokens=200
+            )
+            
+            if not result:
+                return []
+            
+            # Try to extract JSON array from response
+            result = result.strip()
+            
+            # Remove markdown code blocks if present
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+                result = result.strip()
+            
+            # Parse JSON
+            try:
+                domains = json.loads(result)
+                if isinstance(domains, list):
+                    # Validate domains are in the allowed list
+                    valid_domains = [d for d in domains if d in LEGAL_DOMAINS]
+                    if valid_domains:
+                        self.logger.info(f"✓ LLM classified into: {valid_domains}")
+                        return valid_domains[:3]
+            except json.JSONDecodeError:
+                # Try to extract domains from text response
+                domains = []
+                for domain in LEGAL_DOMAINS:
+                    if domain.lower() in result.lower():
+                        domains.append(domain)
+                if domains:
+                    self.logger.info(f"✓ LLM classified (extracted): {domains}")
+                    return domains[:3]
+            
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Error in LLM classification: {e}", exc_info=True)
+            return []

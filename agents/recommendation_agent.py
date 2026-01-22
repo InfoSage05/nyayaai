@@ -3,7 +3,9 @@ from typing import Dict, Any, List, Set
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
 from database.qdrant_client import qdrant_manager
 from utils.embeddings import get_embedding
+from llm.groq_client import groq_llm
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -58,40 +60,55 @@ class RecommendationAgent(BaseAgent):
         
         self.log_retrieval("civic_process_vectors", len(process_results), 0.4)
         
-        # STRUCTURED: Format and deduplicate recommendations
-        recommendations = []
-        seen_actions = set()
+        # Step 1: Try LLM-based recommendation generation first
+        self.logger.info("Attempting LLM-based recommendation generation...")
+        recommendations = self._llm_generate_recommendations(
+            query=input_data.query,
+            retrieved_processes=process_results,
+            context=context
+        )
+        generation_method = "llm"
         
-        for result in process_results:
-            payload = result["payload"]
-            action_name = payload.get("action", "").strip().lower()
+        # Step 2: If LLM fails, use template-based generation
+        if not recommendations:
+            self.logger.info("LLM generation failed, using template-based fallback...")
+            recommendations = []
+            seen_actions = set()
             
-            # Skip duplicates
-            if action_name in seen_actions:
-                logger.debug(f"Skipping duplicate action: {action_name}")
-                continue
+            for result in process_results:
+                payload = result["payload"]
+                action_name = payload.get("action", "").strip().lower()
+                
+                # Skip duplicates
+                if action_name in seen_actions:
+                    logger.debug(f"Skipping duplicate action: {action_name}")
+                    continue
+                
+                seen_actions.add(action_name)
+                
+                structured_rec = {
+                    "action": payload.get("action", "Unnamed Action"),
+                    "responsible_authority": payload.get("authority", "Relevant Government Authority"),
+                    "why_this_matters": self._generate_why(payload, input_data.query),
+                    "next_step": self._generate_next_step(payload),
+                    "estimated_timeline": payload.get("timeline", "Varies by case"),
+                    "is_legal_advice": False,
+                    "sequence": len(recommendations) + 1,
+                    "required_documents": payload.get("required_documents", []),
+                    "confidence": result["score"]
+                }
+                
+                recommendations.append(structured_rec)
+                
+                # Limit to 5 unique recommendations
+                if len(recommendations) >= 5:
+                    break
             
-            seen_actions.add(action_name)
-            
-            structured_rec = {
-                "action": payload.get("action", "Unnamed Action"),
-                "responsible_authority": payload.get("authority", "Relevant Government Authority"),
-                "why_this_matters": self._generate_why(payload, input_data.query),
-                "next_step": self._generate_next_step(payload),
-                "estimated_timeline": payload.get("timeline", "Varies by case"),
-                "is_legal_advice": False,
-                "sequence": len(recommendations) + 1,  # Sequential ordering
-                "required_documents": payload.get("required_documents", []),
-                "confidence": result["score"]
-            }
-            
-            recommendations.append(structured_rec)
-            
-            # Limit to 5 unique recommendations
-            if len(recommendations) >= 5:
-                break
+            generation_method = "template"
         
         confidence = process_results[0]["score"] if process_results else 0.0
+        if generation_method == "llm":
+            confidence = 0.8  # Higher confidence for LLM-generated
         
         return AgentOutput(
             result={
@@ -101,14 +118,15 @@ class RecommendationAgent(BaseAgent):
             },
             retrieved_documents=process_results,
             confidence=float(confidence),
-            reasoning=f"Generated {len(recommendations)} unique, structured civic action(s)",
+            reasoning=f"Generated {len(recommendations)} unique, structured civic action(s) using {generation_method}",
             agent_name=self.name,
             metadata={
+                "generation_method": generation_method,
+                "llm_used": generation_method == "llm",
                 "domain_filter": primary_domain,
                 "collection": "civic_process_vectors",
                 "deduplication": "enabled",
-                "max_results": 5,
-                "structure": "action | authority | why | next_step | timeline"
+                "max_results": 5
             }
         )
 
@@ -165,3 +183,111 @@ class RecommendationAgent(BaseAgent):
             f"Note: This is informational guidance, not legal advice. "
             f"Consult appropriate authorities for case-specific guidance."
         )
+    
+    def _llm_generate_recommendations(self, query: str, retrieved_processes: List[Dict[str, Any]], context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Use LLM to generate structured recommendations from retrieved processes.
+        
+        Args:
+            query: User query
+            retrieved_processes: List of retrieved civic process documents
+            context: Additional context (statutes, cases, etc.)
+            
+        Returns:
+            List of structured recommendation dictionaries
+        """
+        if groq_llm is None:
+            self.logger.warning("Groq LLM not available for recommendation generation")
+            return []
+        
+        if not retrieved_processes:
+            return []
+        
+        try:
+            # Build context from retrieved processes
+            processes_context = []
+            for i, proc in enumerate(retrieved_processes[:10], 1):
+                payload = proc.get("payload", {})
+                processes_context.append(
+                    f"{i}. Action: {payload.get('action', 'Unknown')}\n"
+                    f"   Authority: {payload.get('authority', 'N/A')}\n"
+                    f"   Description: {payload.get('description', '')[:200]}\n"
+                    f"   Steps: {', '.join(payload.get('steps', [])[:3])}\n"
+                    f"   Timeline: {payload.get('timeline', 'N/A')}"
+                )
+            
+            system_prompt = """You are a civic action recommendation assistant. Your task is to generate structured, actionable recommendations based on retrieved civic processes.
+
+For each recommendation, provide:
+1. action: Clear action name
+2. responsible_authority: Which authority handles this
+3. why_this_matters: Why this action is important (1-2 sentences)
+4. next_step: Concrete next step user should take (1-2 sentences)
+5. estimated_timeline: Expected timeline if available
+
+Return a JSON array of recommendation objects. Maximum 5 recommendations.
+Example format:
+[
+  {
+    "action": "File RTI Application",
+    "responsible_authority": "Public Information Officer",
+    "why_this_matters": "This allows access to information held by public authorities.",
+    "next_step": "Prepare RTI application with specific questions and submit to relevant PIO.",
+    "estimated_timeline": "30 days for response"
+  }
+]
+
+IMPORTANT: These are informational recommendations, NOT legal advice."""
+
+            user_prompt = f"""User Query: {query}
+
+Retrieved Civic Processes:
+{chr(10).join(processes_context)}
+
+Generate 3-5 structured, actionable recommendations based on the retrieved processes. 
+Focus on what the user can actually do to address their query.
+Return ONLY a JSON array."""
+
+            result = groq_llm.generate_response(
+                prompt=f"{system_prompt}\n\n{user_prompt}",
+                temperature=0.3,
+                max_tokens=1500
+            )
+            
+            if not result:
+                return []
+            
+            # Clean and parse JSON
+            result = result.strip()
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+                result = result.strip()
+            
+            try:
+                recommendations = json.loads(result)
+                if isinstance(recommendations, list):
+                    # Validate and structure recommendations
+                    structured = []
+                    for rec in recommendations[:5]:
+                        if isinstance(rec, dict):
+                            structured.append({
+                                "action": rec.get("action", "Unnamed Action"),
+                                "responsible_authority": rec.get("responsible_authority", "Relevant Authority"),
+                                "why_this_matters": rec.get("why_this_matters", ""),
+                                "next_step": rec.get("next_step", ""),
+                                "estimated_timeline": rec.get("estimated_timeline", "Varies by case"),
+                                "is_legal_advice": False,
+                                "sequence": len(structured) + 1
+                            })
+                    if structured:
+                        self.logger.info(f"✓ LLM generated {len(structured)} recommendations")
+                        return structured
+            except json.JSONDecodeError:
+                self.logger.warning("Failed to parse LLM JSON response")
+            
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Error in LLM recommendation generation: {e}", exc_info=True)
+            return []
