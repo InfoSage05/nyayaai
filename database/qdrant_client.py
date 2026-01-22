@@ -1,6 +1,4 @@
 """Qdrant client wrapper and utilities."""
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
 from typing import List, Dict, Any, Optional
 import logging
 
@@ -8,36 +6,86 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Optional imports - handle gracefully if qdrant_client is not installed
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Distance, VectorParams, PointStruct
+    QDRANT_AVAILABLE = True
+except ImportError:
+    logger.warning("qdrant_client not installed. Qdrant operations will not work.")
+    QdrantClient = None
+    Distance = None
+    VectorParams = None
+    PointStruct = None
+    QDRANT_AVAILABLE = False
+
 
 class QdrantManager:
     """Manages Qdrant connections and operations."""
     
     def __init__(self):
-        """Initialize Qdrant client."""
-        # For local Qdrant, don't use HTTPS or API key
-        # For cloud Qdrant, use URL and API key
-        if settings.qdrant_api_key:
-            # Cloud Qdrant
-            self.client = QdrantClient(
-                url=f"https://{settings.qdrant_host}",
-                api_key=settings.qdrant_api_key,
-            )
-            logger.info(f"Connected to cloud Qdrant")
-        else:
-            # Local Qdrant (default)
-            self.client = QdrantClient(
-                host=settings.qdrant_host,
-                port=settings.qdrant_port,
-            )
-            logger.info(f"Connected to local Qdrant at {settings.qdrant_host}:{settings.qdrant_port}")
+        """Initialize Qdrant client (lazy connection)."""
+        self._client = None
+        self._connected = False
+    
+    @property
+    def client(self) -> QdrantClient:
+        """Get Qdrant client with lazy connection."""
+        if not QDRANT_AVAILABLE:
+            raise ImportError("qdrant_client package is not installed. Install it with: pip install qdrant-client")
+        
+        if self._client is None:
+            try:
+                # For local Qdrant, don't use HTTPS or API key
+                # For cloud Qdrant, use URL and API key
+                if settings.qdrant_api_key:
+                    # Cloud Qdrant
+                    self._client = QdrantClient(
+                        url=f"https://{settings.qdrant_host}",
+                        api_key=settings.qdrant_api_key,
+                    )
+                    logger.info(f"Connected to cloud Qdrant")
+                else:
+                    # Local Qdrant (default)
+                    # Don't use timeout in constructor - it might cause issues
+                    # Connection will be tested on first operation
+                    self._client = QdrantClient(
+                        host=settings.qdrant_host,
+                        port=settings.qdrant_port,
+                    )
+                    # Test connection with a simple operation
+                    try:
+                        self._client.get_collections()
+                        logger.info(f"Connected to local Qdrant at {settings.qdrant_host}:{settings.qdrant_port}")
+                    except Exception as conn_err:
+                        logger.warning(f"Qdrant connection test failed: {conn_err}")
+                        logger.info("Qdrant may not be running. Start with: docker compose up -d qdrant")
+                        # Keep client but mark as potentially unavailable
+                        self._connected = False
+                        raise ConnectionError(f"Qdrant not available at {settings.qdrant_host}:{settings.qdrant_port}. Start Docker: docker compose up -d qdrant")
+                self._connected = True
+            except (ConnectionError, ImportError):
+                # Re-raise connection/import errors
+                raise
+            except Exception as e:
+                logger.warning(f"Could not connect to Qdrant: {e}. Operations will fail gracefully.")
+                self._connected = False
+                raise ConnectionError(f"Qdrant not available: {e}")
+        return self._client
     
     def create_collection(
         self,
         collection_name: str,
         vector_size: int = 384,  # all-MiniLM-L6-v2 dimension
-        distance: Distance = Distance.COSINE
+        distance = None
     ) -> bool:
         """Create a Qdrant collection if it doesn't exist."""
+        if not QDRANT_AVAILABLE:
+            raise ImportError("qdrant_client package is not installed")
+        
+        if distance is None:
+            distance = Distance.COSINE if Distance else None
+        
         try:
             collections = self.client.get_collections().collections
             collection_names = [c.name for c in collections]
@@ -62,7 +110,7 @@ class QdrantManager:
     def upsert_points(
         self,
         collection_name: str,
-        points: List[PointStruct]
+        points: List[Any]
     ) -> bool:
         """Insert or update points in a collection."""
         try:
@@ -143,4 +191,5 @@ class QdrantManager:
 
 
 # Global Qdrant manager instance
+# Initialize immediately - connection is lazy (only when client property is accessed)
 qdrant_manager = QdrantManager()
