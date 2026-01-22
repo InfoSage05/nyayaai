@@ -11,7 +11,7 @@ errors = []
 # Test 1: Frontend app
 try:
     print("1. Testing frontend/app.py...")
-    from frontend.app import process_query, display_results, main
+    from frontend.app import process_query, display_structured_results, main
     print("   ✓ frontend/app.py imports successfully")
 except Exception as e:
     print(f"   ✗ Error in frontend/app.py: {e}")
