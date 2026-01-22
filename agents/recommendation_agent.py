@@ -215,28 +215,42 @@ class RecommendationAgent(BaseAgent):
                     f"   Timeline: {payload.get('timeline', 'N/A')}"
                 )
             
-            system_prompt = """You are a civic action recommendation assistant. Your task is to generate structured, actionable recommendations based on retrieved civic processes.
+            system_prompt = """You are an expert civic action recommendation assistant specializing in Indian legal and administrative processes. Your task is to generate structured, actionable, and practical recommendations based on retrieved civic processes and legal context.
 
-For each recommendation, provide:
-1. action: Clear action name
-2. responsible_authority: Which authority handles this
-3. why_this_matters: Why this action is important (1-2 sentences)
-4. next_step: Concrete next step user should take (1-2 sentences)
-5. estimated_timeline: Expected timeline if available
+RECOMMENDATION REQUIREMENTS:
+For each recommendation, provide comprehensive information:
+1. action: Clear, specific action name
+2. responsible_authority: Which authority, department, or office handles this (be specific)
+3. why_this_matters: Why this action is important and how it addresses the user's query (2-3 sentences)
+4. next_step: Concrete, actionable next step the user should take (2-3 sentences with specific details)
+5. estimated_timeline: Expected timeline, processing time, or response time if available
+6. required_documents: List of documents or information needed (if applicable)
+7. contact_info: How to contact the relevant authority (if available)
 
-Return a JSON array of recommendation objects. Maximum 5 recommendations.
+OUTPUT FORMAT:
+Return a JSON array of recommendation objects. Maximum 5 recommendations, prioritized by relevance and practicality.
+
 Example format:
 [
   {
-    "action": "File RTI Application",
-    "responsible_authority": "Public Information Officer",
-    "why_this_matters": "This allows access to information held by public authorities.",
-    "next_step": "Prepare RTI application with specific questions and submit to relevant PIO.",
-    "estimated_timeline": "30 days for response"
+    "action": "File RTI Application under Right to Information Act, 2005",
+    "responsible_authority": "Public Information Officer (PIO) of the relevant public authority",
+    "why_this_matters": "The RTI Act empowers citizens to access information held by public authorities. This action allows you to obtain specific information related to your query, promoting transparency and accountability in governance.",
+    "next_step": "Prepare a written RTI application with specific questions, pay the prescribed fee (Rs. 10), and submit it to the PIO of the relevant public authority either in person, by post, or online through the RTI portal.",
+    "estimated_timeline": "30 days for response (45 days if information concerns life or liberty)",
+    "required_documents": ["RTI application form", "Fee payment proof", "Identity proof"],
+    "contact_info": "Contact the PIO of the relevant public authority or visit rti.gov.in"
   }
 ]
 
-IMPORTANT: These are informational recommendations, NOT legal advice."""
+QUALITY STANDARDS:
+- Specificity: Be specific about authorities, processes, and requirements
+- Practicality: Focus on actions the user can actually take
+- Accuracy: Base recommendations on retrieved processes and legal context
+- Completeness: Include all relevant details (timeline, documents, contacts)
+- Clarity: Use clear, accessible language
+
+IMPORTANT: These are informational recommendations for civic actions, NOT legal advice. Do not suggest litigation strategies."""
 
             user_prompt = f"""User Query: {query}
 

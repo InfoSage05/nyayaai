@@ -32,3 +32,6 @@ streamlit>=1.28.2
 
 # Extra Libraries - PDF Processing
 PyPDF2
+
+# Web Search
+tavily-python>=0.3.0

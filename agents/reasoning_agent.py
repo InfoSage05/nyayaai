@@ -2,6 +2,7 @@
 from typing import Dict, Any, List
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
 from llm.groq_client import groq_llm
+from utils.tavily_search import get_tavily_search
 
 
 class ReasoningAgent(BaseAgent):
@@ -34,6 +35,23 @@ class ReasoningAgent(BaseAgent):
         statutes = context.get("statutes", [])
         cases = context.get("similar_cases", [])
         
+        # Perform web search for recent legal updates if available
+        web_search_results = []
+        tavily = get_tavily_search()
+        if tavily and tavily.client:
+            try:
+                # Search for recent legal information related to the query
+                search_query = f"{input_data.query} Indian law recent updates"
+                web_search_results = tavily.search_legal_info(
+                    query=search_query,
+                    max_results=3
+                )
+                if web_search_results:
+                    self.logger.info(f"Retrieved {len(web_search_results)} web search results for reasoning")
+                    context["web_search_results"] = web_search_results
+            except Exception as e:
+                self.logger.warning(f"Web search failed: {e}")
+        
         # Build context from retrieved documents
         retrieved_context = self._build_context(statutes, cases)
         
@@ -48,28 +66,65 @@ class ReasoningAgent(BaseAgent):
                 agent_name=self.name
             )
         
-        # System prompt enforcing retrieval-bounded behavior
-        system_prompt = """You are a legal information assistant. You MUST:
-1. Only use information from the provided retrieved documents
-2. Cite specific statutes, sections, and cases when making claims
-3. Clearly state when information is not available in the retrieved documents
-4. NEVER provide legal advice or litigation strategy
-5. Explain legal concepts in simple language
-6. Indicate what is known and what is unknown"""
+        # Enhanced system prompt for retrieval-bounded legal reasoning
+        system_prompt = """You are an expert legal reasoning assistant specializing in Indian law. Your task is to provide comprehensive legal analysis based ONLY on the provided documents.
+
+CRITICAL REQUIREMENTS:
+1. STRICT EVIDENCE-BASED REASONING: Only use information from the provided retrieved documents (statutes, cases, web resources)
+2. PRECISE CITATIONS: Always cite specific statutes, sections, articles, case names, courts, and years when making legal claims
+3. TRANSPARENCY: Clearly state when information is not available in the retrieved documents - never fabricate or assume
+4. NO LEGAL ADVICE: Provide legal information and analysis, NOT legal advice or litigation strategy
+5. CLARITY: Explain complex legal concepts in simple, accessible language that non-lawyers can understand
+6. COMPREHENSIVE ANALYSIS: Address all aspects of the query, including:
+   - Relevant legal provisions and their interpretation
+   - How statutes apply to the situation
+   - Precedents from similar cases
+   - Recent legal developments (if available in sources)
+   - Gaps or limitations in available information
+7. STRUCTURED OUTPUT: Organize your response with clear sections, headings, and formatting
+8. CONTEXT AWARENESS: Consider the broader legal framework and how different laws interact
+
+OUTPUT FORMAT:
+- Introduction: Brief overview of the legal area
+- Relevant Legal Provisions: Specific statutes, sections, articles cited
+- Case Law Analysis: How courts have interpreted and applied these laws
+- Application to Query: How the law applies to the user's situation (informational)
+- Limitations: What information is missing or unclear
+- Important Notes: Disclaimers and caveats"""
         
-        # Build user prompt
+        # Build enhanced user prompt with web search context if available
+        web_context = context.get("web_search_results", [])
+        web_info = ""
+        if web_context:
+            web_info = "\n\n=== RECENT LEGAL UPDATES & WEB SOURCES ===\n"
+            for i, result in enumerate(web_context[:3], 1):
+                web_info += f"{i}. {result.get('title', 'Unknown')}\n"
+                web_info += f"   Source: {result.get('url', 'N/A')}\n"
+                web_info += f"   Content: {result.get('content', '')[:200]}...\n\n"
+        
         user_prompt = f"""User Query: {input_data.query}
 
-Retrieved Legal Documents:
+=== RETRIEVED LEGAL DOCUMENTS ===
 {retrieved_context}
+{web_info}
 
-Based ONLY on the retrieved documents above, provide:
-1. A clear explanation of relevant legal provisions
-2. How they apply to the user's query
-3. What information is missing or unclear
-4. Citations to specific statutes/cases used
+TASK:
+Based ONLY on the retrieved documents and web sources above, provide a comprehensive legal analysis that:
 
-Remember: Only use information from the retrieved documents. Do not make up or assume legal provisions."""
+1. EXPLANATION: Clear, detailed explanation of relevant legal provisions, their interpretation, and application
+2. STATUTE ANALYSIS: Specific statutes, sections, and articles cited with their relevance to the query
+3. CASE LAW ANALYSIS: How courts have interpreted and applied these laws in similar situations
+4. APPLICATION: How the law applies to the user's query (informational analysis, not advice)
+5. RECENT DEVELOPMENTS: Any recent updates, amendments, or changes mentioned in web sources
+6. GAPS & LIMITATIONS: What information is missing, unclear, or requires further research
+7. CITATIONS: Precise citations to all statutes, cases, and sources used
+
+IMPORTANT:
+- Only use information from the provided documents and web sources
+- Never fabricate, assume, or make up legal provisions
+- If information is not available, clearly state that
+- Maintain objectivity and neutrality
+- Use clear, structured formatting with sections and headings"""
 
         # Generate reasoning
         explanation = None

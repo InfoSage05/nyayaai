@@ -159,12 +159,22 @@ class ClassificationAgent(BaseAgent):
         try:
             domains_list = ", ".join(LEGAL_DOMAINS)
             
-            system_prompt = """You are a legal domain classification expert. Your task is to classify legal queries into appropriate legal domains.
+            system_prompt = """You are an expert legal domain classification specialist for Indian law. Your task is to accurately classify legal queries into the most appropriate legal domains.
 
-Available domains: """ + domains_list + """
+AVAILABLE DOMAINS: """ + domains_list + """
 
-Return ONLY a JSON array of domain names that best match the query. Return 1-3 most relevant domains.
-Example: ["consumer_protection", "civic_rights"]"""
+CLASSIFICATION GUIDELINES:
+1. Analyze the query comprehensively to identify all relevant legal domains
+2. Consider primary legal areas, secondary related areas, and cross-cutting issues
+3. Return 1-3 most relevant domains in order of relevance
+4. Be precise - only classify into domains that are clearly relevant
+5. Consider Indian legal framework and jurisdiction
+
+OUTPUT FORMAT:
+Return ONLY a JSON array of domain names (1-3 domains) in order of relevance.
+Example: ["consumer_protection", "civic_rights"]
+
+IMPORTANT: Only use domains from the available list. Be accurate and precise."""
 
             user_prompt = f"""Classify this legal query into the most appropriate legal domain(s):
 

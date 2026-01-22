@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Groq Configuration
     groq_api_key: Optional[str] = None
     
+    # Tavily Search Configuration
+    tavily_api_key: Optional[str] = None
+    
     # Embedding Model
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     
@@ -72,6 +75,7 @@ def _load_settings():
         qdrant_host=os.getenv("QDRANT_HOST", "localhost"),
         qdrant_port=int(os.getenv("QDRANT_PORT", "6333")),
         qdrant_api_key=os.getenv("QDRANT_API_KEY"),
+        tavily_api_key=os.getenv("TAVILY_API_KEY"),
     )
 
 
