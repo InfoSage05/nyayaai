@@ -12,6 +12,7 @@ from agents.recommendation_agent import RecommendationAgent
 from agents.ethics_agent import EthicsAgent
 from agents.memory_agent import MemoryAgent
 from agents.summarization_agent import SummarizationAgent
+from agents.web_search_agent import WebSearchAgent
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class NyayaOrchestrator:
             self.ethics_agent = EthicsAgent()
             self.memory_agent = MemoryAgent()
             self.summarization_agent = SummarizationAgent()
+            self.web_search_agent = WebSearchAgent()
             
             # Build graph
             self.graph = self._build_graph()
@@ -57,6 +59,7 @@ class NyayaOrchestrator:
         workflow.add_node("classification", self._classification_node)
         workflow.add_node("knowledge_retrieval", self._knowledge_node)
         workflow.add_node("case_similarity", self._case_node)
+        workflow.add_node("web_search", self._web_search_node)
         workflow.add_node("reasoning", self._reasoning_node)
         workflow.add_node("recommendation", self._recommendation_node)
         workflow.add_node("ethics", self._ethics_node)
@@ -68,10 +71,12 @@ class NyayaOrchestrator:
         workflow.add_edge("intake", "classification")
         workflow.add_edge("classification", "knowledge_retrieval")
         workflow.add_edge("knowledge_retrieval", "case_similarity")
-        workflow.add_edge("case_similarity", "reasoning")
+        workflow.add_edge("case_similarity", "web_search")
+        workflow.add_edge("web_search", "reasoning")
         workflow.add_edge("reasoning", "recommendation")
         workflow.add_edge("recommendation", "ethics")
         workflow.add_edge("ethics", "memory")
+        workflow.add_edge("memory", "summarization")
         workflow.add_edge("memory", "summarization")
         workflow.add_edge("summarization", END)
         
@@ -144,31 +149,63 @@ class NyayaOrchestrator:
             state["errors"].append(f"Case similarity error: {str(e)}")
         return state
     
-    def _reasoning_node(self, state: AgentState) -> AgentState:
-        """Reasoning agent node."""
+    def _web_search_node(self, state: AgentState) -> AgentState:
+        """Web search agent node."""
         try:
             input_data = AgentInput(
                 query=state["query"],
                 context=state["context"]
             )
-            output = self.reasoning_agent.process(input_data)
+            output = self.web_search_agent.process(input_data)
             
-            # Update context with explanation
-            explanation = output.result.get("explanation", "") if output.result else ""
+            # Update context with web results
+            state["context"]["web_search_results"] = output.result.get("web_results", [])
+            state["agent_outputs"]["web_search"] = output
+        except Exception as e:
+            logger.error(f"Error in web search node: {e}")
+            state["errors"].append(f"Web search error: {str(e)}")
+        return state
+    
+    def _reasoning_node(self, state: AgentState) -> AgentState:
+        """GroqLLM synthesis node - combines all evidence into final response."""
+        try:
+            from llm.groq_client import groq_llm
             
-            # Ensure explanation is never empty
-            if not explanation or explanation.strip() == "":
-                statutes_count = len(state["context"].get("statutes", []))
-                cases_count = len(state["context"].get("similar_cases", []))
-                explanation = f"Based on {statutes_count} retrieved statutes and {cases_count} similar cases, here are the relevant legal provisions."
+            # Get all context
+            statutes = state["context"].get("statutes", [])
+            similar_cases = state["context"].get("similar_cases", [])
+            web_results = state["context"].get("web_search_results", [])
             
-            state["context"]["explanation"] = explanation
+            # Call GroqLLM to synthesize everything
+            synthesis_result = groq_llm.synthesize_legal_answer(
+                query=state["query"],
+                retrieved_statutes=statutes,
+                similar_cases=similar_cases,
+                web_search_results=web_results
+            )
+            
+            # Update context with synthesis result
+            state["context"]["synthesis"] = synthesis_result
+            state["final_result"] = synthesis_result
+            
+            # Create a dummy agent output for compatibility
+            from core.agent_base import AgentOutput
+            output = AgentOutput(
+                result=synthesis_result,
+                confidence=synthesis_result.get("confidence_level", "medium"),
+                reasoning="Synthesized all evidence into comprehensive response",
+                agent_name="groq_synthesis"
+            )
             state["agent_outputs"]["reasoning"] = output
+            
         except Exception as e:
             logger.error(f"Error in reasoning node: {e}")
-            state["errors"].append(f"Reasoning error: {str(e)}")
-            # Provide fallback explanation
-            state["context"]["explanation"] = "Legal provisions apply to your query. Please review the statutes and cases above for details."
+            state["errors"].append(f"Synthesis error: {str(e)}")
+            # Provide fallback
+            state["final_result"] = {
+                "plain_language_explanation": "Unable to generate response at this time.",
+                "confidence_level": "low"
+            }
         return state
     
     def _recommendation_node(self, state: AgentState) -> AgentState:
@@ -391,6 +428,7 @@ class NyayaOrchestrator:
                     ],
                 }
             else:
+                web_results = context.get("web_search_results", [])
                 llm_answer = groq_llm.synthesize_legal_answer(
                     query=query,
                     retrieved_statutes=[{
@@ -403,6 +441,7 @@ class NyayaOrchestrator:
                         "summary": c.summary,
                         "source": c.source
                     } for c in cases],
+                    web_search_results=web_results,
                     temperature=0.3,
                     max_tokens=2000
                 )
@@ -412,7 +451,15 @@ class NyayaOrchestrator:
                 confidence_level=llm_answer.get("confidence_level", "medium"),
                 reasoning_steps=llm_answer.get("reasoning_steps", []),
                 limitations=llm_answer.get("limitations", ""),
-                disclaimers=llm_answer.get("disclaimers", [])
+                disclaimers=llm_answer.get("disclaimers", []),
+                plain_language_explanation=llm_answer.get("plain_language_explanation"),
+                what_law_says=llm_answer.get("what_law_says"),
+                retrieved_evidence=llm_answer.get("retrieved_evidence"),
+                similar_cases=llm_answer.get("similar_cases"),
+                web_sources=llm_answer.get("web_sources"),
+                what_you_can_consider=llm_answer.get("what_you_can_consider"),
+                disclaimer=llm_answer.get("disclaimer"),
+                full_response=llm_answer.get("full_response")
             )
             
             # Phase 5: Extract similar case analysis

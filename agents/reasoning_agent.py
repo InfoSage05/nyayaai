@@ -35,23 +35,6 @@ class ReasoningAgent(BaseAgent):
         statutes = context.get("statutes", [])
         cases = context.get("similar_cases", [])
         
-        # Perform web search for recent legal updates if available
-        web_search_results = []
-        tavily = get_tavily_search()
-        if tavily and tavily.client:
-            try:
-                # Search for recent legal information related to the query
-                search_query = f"{input_data.query} Indian law recent updates"
-                web_search_results = tavily.search_legal_info(
-                    query=search_query,
-                    max_results=3
-                )
-                if web_search_results:
-                    self.logger.info(f"Retrieved {len(web_search_results)} web search results for reasoning")
-                    context["web_search_results"] = web_search_results
-            except Exception as e:
-                self.logger.warning(f"Web search failed: {e}")
-        
         # Build context from retrieved documents
         retrieved_context = self._build_context(statutes, cases)
         

@@ -18,7 +18,7 @@ def process_query(query: str, user_id: str = "anonymous") -> Dict[str, Any]:
     """Call the API to process a query."""
     try:
         response = requests.post(
-            f"{API_URL}/api/v1/query",
+            f"{API_URL}/api/v1/query/structured",
             json={"query": query, "user_id": user_id},
             timeout=60
         )
@@ -80,11 +80,124 @@ def main():
                 if not has_summary and not has_explanation:
                     st.warning("No response generated. The system may still be processing.")
                 else:
-                    display_results(result)
+                    # Check for new structured response format
+                    llm_answer = result.get('llm_reasoned_answer', {})
+                    if llm_answer:
+                        display_structured_results(result)
+                    else:
+                        # Fallback to legacy display
+                        display_results_legacy(result)
 
 
-def display_results(result: Dict[str, Any]):
-    """Display query results."""
+def display_structured_results(result: Dict[str, Any]):
+    """Display new structured query results."""
+    st.markdown("---")
+    
+    # Query info
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"**Query:** {result.get('query', 'N/A')}")
+    with col2:
+        if result.get('case_id'):
+            st.markdown(f"**Case ID:** `{result['case_id']}`")
+    
+    # Legal domain
+    domain = result.get('legal_domain', '')
+    if domain:
+        st.markdown(f"**Legal Domain:** {domain}")
+    
+    st.markdown("---")
+    
+    # LLM reasoned answer with structured sections
+    llm_answer = result.get('llm_reasoned_answer', {})
+    
+    # Plain language explanation first
+    if llm_answer.get('plain_language_explanation'):
+        st.markdown("### 💬 Plain Language Explanation")
+        st.markdown(llm_answer['plain_language_explanation'])
+        st.markdown("---")
+    
+    # What the law generally says
+    if llm_answer.get('what_law_says'):
+        st.markdown("### ⚖️ What the Law Generally Says")
+        st.markdown(llm_answer['what_law_says'])
+        st.markdown("---")
+    
+    # Retrieved evidence
+    if llm_answer.get('retrieved_evidence'):
+        st.markdown("### 📜 Retrieved Evidence")
+        st.markdown(llm_answer['retrieved_evidence'])
+        st.markdown("---")
+    
+    # Similar case examples
+    if llm_answer.get('similar_cases'):
+        st.markdown("### 🏛️ Similar Case Examples")
+        st.markdown(llm_answer['similar_cases'])
+        st.markdown("---")
+    
+    # Web sources
+    if llm_answer.get('web_sources'):
+        st.markdown("### 🌐 Web Sources")
+        st.markdown(llm_answer['web_sources'])
+        st.markdown("---")
+    
+    # What you can consider
+    if llm_answer.get('what_you_can_consider'):
+        st.markdown("### 🤔 What You Can Consider")
+        st.markdown(llm_answer['what_you_can_consider'])
+        st.markdown("---")
+    
+    # Disclaimer
+    if llm_answer.get('disclaimer'):
+        st.warning(llm_answer['disclaimer'])
+        st.markdown("---")
+    
+    # Show retrieved evidence details if available
+    evidence = result.get('retrieved_evidence', {})
+    if evidence.get('statutes') or evidence.get('cases'):
+        st.markdown("### 🔍 Detailed Evidence")
+        
+        statutes = evidence.get('statutes', [])
+        if statutes:
+            st.markdown("**Statutes:**")
+            for statute in statutes[:3]:
+                with st.expander(f"📜 {statute.get('title', 'Unknown')}"):
+                    st.markdown(f"**Summary:** {statute.get('summary', 'N/A')}")
+                    st.markdown(f"**Source:** {statute.get('source', 'N/A')}")
+                    if statute.get('relevance_score'):
+                        st.markdown(f"**Relevance:** {statute['relevance_score']:.3f}")
+        
+        cases = evidence.get('cases', [])
+        if cases:
+            st.markdown("**Cases:**")
+            for case in cases[:3]:
+                with st.expander(f"⚖️ {case.get('case_name', 'Unknown')}"):
+                    st.markdown(f"**Summary:** {case.get('summary', 'N/A')}")
+                    st.markdown(f"**Source:** {case.get('source', 'N/A')}")
+                    if case.get('year'):
+                        st.markdown(f"**Year:** {case['year']}")
+                    if case.get('relevance_score'):
+                        st.markdown(f"**Relevance:** {case['relevance_score']:.3f}")
+    
+    # Civic action recommendations
+    recommendations = result.get('civic_action_recommendations', [])
+    if recommendations:
+        st.markdown("### 🎯 Civic Action Recommendations")
+        for i, rec in enumerate(recommendations[:5], 1):
+            action = rec.get('action', 'N/A')
+            with st.expander(f"{i}. {action}"):
+                if rec.get('why_this_matters'):
+                    st.markdown(f"**Why This Matters:** {rec['why_this_matters']}")
+                if rec.get('responsible_authority'):
+                    st.markdown(f"**Responsible Authority:** {rec['responsible_authority']}")
+                if rec.get('next_step'):
+                    st.markdown(f"**Next Step:** {rec['next_step']}")
+                if rec.get('estimated_timeline'):
+                    st.markdown(f"**Estimated Timeline:** {rec['estimated_timeline']}")
+
+
+def display_results_legacy(result: Dict[str, Any]):
+    """Display legacy query results."""
     st.markdown("---")
     
     # Query info

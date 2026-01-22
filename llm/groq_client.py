@@ -30,45 +30,38 @@ class GroqLLM:
         self.model = "llama-3.1-8b-instant"
         
         # Enhanced synthesis-focused system prompt
-        self.system_prompt = """You are an expert LEGAL INFORMATION SYNTHESIS AGENT specializing in Indian law.
+        self.system_prompt = """You are a LEGAL & CIVIC INFORMATION ASSISTANT.
 
-YOUR ROLE:
-You synthesize legal information from multiple sources (statutes, case law, web resources) to provide comprehensive, accurate, and accessible legal information to users.
+Your role is to explain legal and civic concepts in simple,
+easy-to-understand language.
 
-CRITICAL RULES:
-1. You do NOT provide legal advice - you provide legal information only
-2. You synthesize ONLY based on provided evidence - never fabricate or assume
-3. You do NOT fabricate case law, statutes, or legal provisions
-4. You clearly state limitations, unknowns, and gaps in available information
-5. You explain complex legal concepts in simple, accessible language
-6. You identify patterns, precedents, and connections from evidence
-7. You avoid procedural instructions that could be construed as legal advice
-8. You maintain strict neutrality, accuracy, and objectivity
-9. You cite specific sources (statutes, sections, cases, dates) when making claims
-10. You distinguish between established law and recent developments/updates
+You may:
+- Use general public legal knowledge
+- Reason even when no documents are retrieved
+- Summarize retrieved statutes and cases
+- Combine web information with internal knowledge
 
-OUTPUT STRUCTURE:
-- Start with a clear, comprehensive explanation addressing the user's query
-- Identify relevant legal provisions, statutes, and sections
-- Reference similar cases and precedents with specific details
-- Explain how the law applies to the user's situation (informational, not advisory)
-- Explicitly state what is known and what is unknown or unclear
-- Include relevant context about legal framework and jurisdiction
-- Always include appropriate disclaimers about not being legal advice
-- Use structured formatting for clarity (sections, bullet points, citations)
+You must:
+- Clearly label whether information is:
+  (a) General knowledge
+  (b) Retrieved from internal database
+  (c) Retrieved from web search
+- Avoid legal advice
+- Avoid procedural step-by-step instructions
+- State limitations clearly
+- Be neutral and factual
 
-QUALITY STANDARDS:
-- Accuracy: Only use information from provided sources
-- Clarity: Use plain language, avoid excessive legal jargon
-- Completeness: Address all aspects of the query
-- Transparency: Clearly indicate source limitations
-- Safety: Never suggest illegal actions or litigation strategies"""
+You must NEVER:
+- Invent case law or statutes
+- Pretend retrieved data exists when it does not
+- Expose internal chain-of-thought"""
 
     def synthesize_legal_answer(
         self,
         query: str,
         retrieved_statutes: List[Dict[str, str]] = None,
         similar_cases: List[Dict[str, str]] = None,
+        web_search_results: List[Dict[str, str]] = None,
         temperature: float = 0.3,
         max_tokens: int = 2000
     ) -> Dict[str, Any]:
@@ -91,41 +84,43 @@ QUALITY STANDARDS:
             # Build evidence context
             evidence_context = self._build_evidence_context(
                 retrieved_statutes or [],
-                similar_cases or []
+                similar_cases or [],
+                web_search_results or []
             )
             
             # Construct synthesis prompt
             prompt = f"""
-LEGAL INFORMATION SYNTHESIS REQUEST
+User Query: {query}
 
-User Query:
-{query}
-
-Legal Context Provided:
+Available Information:
 {evidence_context}
 
-TASK:
-1. Explain the issue in simple, clear terms (2-3 sentences)
-2. Identify key patterns from the provided statutes and cases
-3. Clearly state:
-   - What is known from the evidence
-   - What is unclear or not covered by evidence
-   - Any limitations or disclaimers
-4. Suggest what steps a person might consider (without giving legal advice)
+TASK: Synthesize a comprehensive response that explains the legal topic in simple terms, like a helpful ChatGPT-style assistant.
 
-Format your response as:
-[SUMMARY]
-<2-3 sentence clear explanation>
+REQUIRED OUTPUT SECTIONS:
 
-[REASONING]
-<Key patterns and connections from evidence>
+[PLAIN LANGUAGE EXPLANATION]
+Explain the topic in simple, everyday language (2-3 sentences)
 
-[KNOWN & UNKNOWN]
-<What the evidence covers and what it doesn't>
+[WHAT THE LAW GENERALLY SAYS]
+Explain general legal principles from public knowledge
 
-[IMPORTANT]
-<Any disclaimers or limitations>
-"""
+[RETRIEVED EVIDENCE]
+Summarize any retrieved statutes or cases (only if available)
+
+[SIMILAR CASE EXAMPLES]
+Describe how similar cases typically proceed (only if available)
+
+[WEB SOURCES]
+Summarize web search findings with URLs (only if used)
+
+[WHAT YOU CAN CONSIDER]
+Non-advisory civic guidance about what people typically do
+
+[DISCLAIMER]
+Clear statement that this is not legal advice
+
+Be helpful, clear, and comprehensive. Never say "no information found" - always provide general explanation."""
             
             response = self.client.chat.completions.create(
                 messages=[
@@ -156,7 +151,8 @@ Format your response as:
     def _build_evidence_context(
         self,
         statutes: List[Dict[str, str]],
-        cases: List[Dict[str, str]]
+        cases: List[Dict[str, str]],
+        web_results: List[Dict[str, str]] = None
     ) -> str:
         """Build formatted evidence context for LLM."""
         context = ""
@@ -175,30 +171,88 @@ Format your response as:
                 outcome = case.get("outcome", case.get("summary", "No details"))
                 context += f"{i}. {name}\n   Outcome: {outcome[:200]}...\n\n"
         
+        if web_results:
+            context += "\nWEB SEARCH RESULTS:\n"
+            for i, result in enumerate(web_results[:3], 1):  # Limit to top 3
+                title = result.get("title", "Unknown")
+                url = result.get("url", "")
+                content = result.get("content", "No content")[:200]
+                context += f"{i}. {title}\n   URL: {url}\n   {content}...\n\n"
+        
         return context if context else "No specific evidence provided."
 
     def _parse_synthesis_response(self, response_text: str) -> Dict[str, Any]:
         """Parse LLM synthesis response into structured format."""
         try:
             sections = {
-                "summary": "",
-                "reasoning_steps": [],
-                "limitations": "",
-                "disclaimers": []
+                "plain_language_explanation": "",
+                "what_law_says": "",
+                "retrieved_evidence": "",
+                "similar_cases": "",
+                "web_sources": "",
+                "what_you_can_consider": "",
+                "disclaimer": "",
+                "full_response": response_text
             }
             
-            # Simple parsing of sections
-            if "[SUMMARY]" in response_text:
-                summary_part = response_text.split("[SUMMARY]")[1].split("[REASONING]")[0].strip()
-                sections["summary"] = summary_part[:500]  # Limit to 500 chars
+            # Parse sections
+            if "[PLAIN LANGUAGE EXPLANATION]" in response_text:
+                part = response_text.split("[PLAIN LANGUAGE EXPLANATION]")[1]
+                if "[" in part:
+                    sections["plain_language_explanation"] = part.split("[")[0].strip()
+                else:
+                    sections["plain_language_explanation"] = part.strip()
             
-            if "[REASONING]" in response_text:
-                reasoning_part = response_text.split("[REASONING]")[1].split("[KNOWN")[0].strip()
-                sections["reasoning_steps"] = [s.strip() for s in reasoning_part.split("\n") if s.strip()]
+            if "[WHAT THE LAW GENERALLY SAYS]" in response_text:
+                part = response_text.split("[WHAT THE LAW GENERALLY SAYS]")[1]
+                if "[" in part:
+                    sections["what_law_says"] = part.split("[")[0].strip()
+                else:
+                    sections["what_law_says"] = part.strip()
             
-            if "[IMPORTANT]" in response_text:
-                important_part = response_text.split("[IMPORTANT]")[1].strip()
-                sections["disclaimers"].append(important_part[:300])
+            if "[RETRIEVED EVIDENCE]" in response_text:
+                part = response_text.split("[RETRIEVED EVIDENCE]")[1]
+                if "[" in part:
+                    sections["retrieved_evidence"] = part.split("[")[0].strip()
+                else:
+                    sections["retrieved_evidence"] = part.strip()
+            
+            if "[SIMILAR CASE EXAMPLES]" in response_text:
+                part = response_text.split("[SIMILAR CASE EXAMPLES]")[1]
+                if "[" in part:
+                    sections["similar_cases"] = part.split("[")[0].strip()
+                else:
+                    sections["similar_cases"] = part.strip()
+            
+            if "[WEB SOURCES]" in response_text:
+                part = response_text.split("[WEB SOURCES]")[1]
+                if "[" in part:
+                    sections["web_sources"] = part.split("[")[0].strip()
+                else:
+                    sections["web_sources"] = part.strip()
+            
+            if "[WHAT YOU CAN CONSIDER]" in response_text:
+                part = response_text.split("[WHAT YOU CAN CONSIDER]")[1]
+                if "[" in part:
+                    sections["what_you_can_consider"] = part.split("[")[0].strip()
+                else:
+                    sections["what_you_can_consider"] = part.strip()
+            
+            if "[DISCLAIMER]" in response_text:
+                sections["disclaimer"] = response_text.split("[DISCLAIMER]")[1].strip()
+            
+            # Determine confidence based on content
+            confidence = "medium"
+            if sections["retrieved_evidence"] or sections["similar_cases"] or sections["web_sources"]:
+                confidence = "high"
+            elif sections["what_law_says"]:
+                confidence = "medium"
+            else:
+                confidence = "low"
+            
+            sections["confidence_level"] = confidence
+            
+            return sections
             
             # Determine confidence based on evidence coverage
             confidence = "medium"

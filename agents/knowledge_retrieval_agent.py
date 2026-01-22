@@ -73,16 +73,16 @@ class KnowledgeRetrievalAgent(BaseAgent):
         
         return AgentOutput(
             result={
-                "statutes": all_statutes,
-                "count": len(all_statutes)
+                "statutes": statutes,
+                "count": len(statutes)
             },
-            retrieved_documents=statute_results + web_statutes,
+            retrieved_documents=statute_results,
             confidence=float(confidence),
-            reasoning=f"Retrieved {len(statutes)} statute(s) from corpus and {len(web_statutes)} from web search",
+            reasoning=f"Retrieved {len(statutes)} statute(s) from corpus",
             agent_name=self.name,
             metadata={
                 "domain_filter": primary_domain,
                 "collection": "statutes_vectors",
-                "web_search_used": len(web_statutes) > 0
+                "web_search_used": False
             }
         )

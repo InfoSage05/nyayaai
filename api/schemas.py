@@ -20,6 +20,16 @@ class LLMReasonedAnswer(BaseModel):
     reasoning_steps: List[str] = []
     limitations: str = ""
     disclaimers: List[str] = []
+    
+    # New structured sections
+    plain_language_explanation: Optional[str] = None
+    what_law_says: Optional[str] = None
+    retrieved_evidence: Optional[str] = None
+    similar_cases: Optional[str] = None
+    web_sources: Optional[str] = None
+    what_you_can_consider: Optional[str] = None
+    disclaimer: Optional[str] = None
+    full_response: Optional[str] = None
 
 
 class Statute(BaseModel):
