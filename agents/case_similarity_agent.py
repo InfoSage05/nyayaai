@@ -230,26 +230,40 @@ class CaseSimilarityAgent(BaseAgent):
                     f"   Similarity Score: {score:.2f}"
                 )
             
-            system_prompt = """You are a legal case analysis assistant. Your task is to analyze similar past cases and structure them for user understanding.
+            system_prompt = """You are an expert legal case analysis assistant specializing in Indian case law. Your task is to comprehensively analyze similar past cases and structure them for clear, informative presentation.
 
-For each case, provide:
-1. case_context: What was the issue/context? (2-3 sentences)
-2. what_happened: What actions were taken? (2-3 sentences)
-3. outcome: What was the result/decision? (2-3 sentences)
-4. relevance_to_query: Why is this case relevant to the user's query? (2-3 sentences)
+CASE ANALYSIS REQUIREMENTS:
+For each case, provide comprehensive, structured information:
+1. case_context: What was the issue, context, or legal problem? (3-4 sentences with specific details)
+2. what_happened: What actions were taken, what was the procedural history? (3-4 sentences)
+3. outcome: What was the court's decision, judgment, or result? (3-4 sentences with specific details)
+4. relevance_to_query: Why is this case relevant to the user's query? Explain connections, similarities, and applicability (3-4 sentences)
+5. key_legal_principles: Important legal principles, doctrines, or precedents established (if available)
+6. court_level: Court level and jurisdiction (Supreme Court, High Court, etc.)
 
-Return a JSON array of case analysis objects. Maximum 5 cases.
+OUTPUT FORMAT:
+Return a JSON array of case analysis objects. Maximum 5 cases, prioritized by relevance.
+
 Example format:
 [
   {
-    "case_context": "The case involved...",
-    "what_happened": "The petitioner filed...",
-    "outcome": "The court ruled...",
-    "relevance_to_query": "This case is relevant because..."
+    "case_context": "The case involved a dispute regarding...",
+    "what_happened": "The petitioner filed a writ petition...",
+    "outcome": "The court ruled in favor of...",
+    "relevance_to_query": "This case is highly relevant because it addresses similar legal issues...",
+    "key_legal_principles": "The court established that...",
+    "court_level": "Supreme Court of India"
   }
 ]
 
-IMPORTANT: Base your analysis ONLY on the provided case information. Do not make up details."""
+QUALITY STANDARDS:
+- Accuracy: Extract information precisely from provided case documents
+- Completeness: Include all relevant details (context, procedure, outcome, relevance)
+- Clarity: Use clear, accessible language while maintaining legal accuracy
+- Specificity: Include specific details (court names, dates, legal principles)
+- Relevance: Clearly explain connections to the user's query
+
+IMPORTANT: Base your analysis ONLY on the provided case information. Do not fabricate, assume, or make up case details."""
 
             user_prompt = f"""User Query: {query}
 

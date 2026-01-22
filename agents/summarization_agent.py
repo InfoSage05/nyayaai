@@ -2,6 +2,7 @@
 from typing import Dict, Any, List
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
 from llm.groq_client import groq_llm
+from utils.tavily_search import get_tavily_search
 import logging
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,22 @@ class SummarizationAgent(BaseAgent):
         explanation = collected_outputs.get("explanation", "")
         recommendations = collected_outputs.get("recommendations", [])
         
+        # Perform additional web search for comprehensive information if available
+        web_search_results = []
+        tavily = get_tavily_search()
+        if tavily and tavily.client:
+            try:
+                # Search for comprehensive legal information
+                search_query = f"{query} Indian law comprehensive information"
+                web_search_results = tavily.search_legal_info(
+                    query=search_query,
+                    max_results=5
+                )
+                if web_search_results:
+                    self.logger.info(f"Retrieved {len(web_search_results)} web search results for summarization")
+            except Exception as e:
+                self.logger.warning(f"Web search failed in summarization: {e}")
+        
         prompt_parts = [
             "=== USER QUERY ===",
             query,
@@ -118,19 +135,37 @@ class SummarizationAgent(BaseAgent):
         else:
             prompt_parts.append("No recommendations generated.")
         
+        # Add web search results if available
+        if web_search_results:
+            prompt_parts.append("")
+            prompt_parts.append("=== ADDITIONAL WEB SOURCES & RECENT UPDATES ===")
+            for i, result in enumerate(web_search_results[:5], 1):
+                if result.get("is_answer"):
+                    prompt_parts.append(f"AI-Generated Answer: {result.get('content', '')[:400]}...")
+                else:
+                    prompt_parts.append(
+                        f"{i}. {result.get('title', 'Unknown')}\n"
+                        f"   Source: {result.get('url', 'N/A')}\n"
+                        f"   Content: {result.get('content', '')[:300]}..."
+                    )
+        
         prompt_parts.append("")
         prompt_parts.append("=== TASK ===")
         prompt_parts.append(
-            "Based on ALL the information above from multiple agents, create a unified, "
-            "coherent final response that:\n"
-            "1. Provides a clear, comprehensive answer to the user's query\n"
-            "2. Synthesizes information from statutes, cases, and recommendations\n"
-            "3. Is written in simple, accessible language\n"
-            "4. Includes relevant citations and references\n"
-            "5. Clearly states what is known and what is unknown\n"
-            "6. Includes appropriate disclaimers\n"
-            "7. Is well-structured and easy to understand\n\n"
-            "IMPORTANT: This is NOT legal advice. Provide information only."
+            "Based on ALL the information above from multiple agents and web sources, create a unified, "
+            "comprehensive, and coherent final response that:\n\n"
+            "1. EXECUTIVE SUMMARY: Provides a clear, comprehensive answer to the user's query upfront\n"
+            "2. LEGAL FRAMEWORK: Synthesizes relevant statutes, acts, sections, and articles with citations\n"
+            "3. CASE LAW ANALYSIS: Integrates similar cases, precedents, and court interpretations\n"
+            "4. RECENT DEVELOPMENTS: Incorporates any recent updates, amendments, or changes from web sources\n"
+            "5. PRACTICAL APPLICATION: Explains how the law applies to the user's situation (informational)\n"
+            "6. ACTIONABLE STEPS: Includes civic actions and recommendations if available\n"
+            "7. TRANSPARENCY: Clearly states what is known, what is unknown, and any gaps in information\n"
+            "8. STRUCTURE: Well-organized with clear sections, headings, and formatting\n"
+            "9. CLARITY: Written in simple, accessible language with minimal legal jargon\n"
+            "10. SAFETY: Includes appropriate disclaimers throughout\n\n"
+            "IMPORTANT: This is NOT legal advice. Provide comprehensive legal information only. "
+            "Cite all sources precisely (statutes, cases, web sources)."
         )
         
         return "\n".join(prompt_parts)
@@ -149,16 +184,37 @@ class SummarizationAgent(BaseAgent):
             return None
         
         try:
-            system_prompt = """You are a legal information synthesis assistant. Your task is to:
-1. Synthesize information from multiple specialized agents
-2. Create a unified, coherent response
-3. Use simple, clear language
-4. Cite specific sources (statutes, cases)
-5. Clearly distinguish what is known vs unknown
-6. Include appropriate disclaimers
-7. NEVER provide legal advice or litigation strategy
+            system_prompt = """You are an expert legal information synthesis assistant specializing in Indian law. Your task is to create a comprehensive, unified response by synthesizing information from multiple specialized agents and sources.
 
-Format your response as a clear, well-structured explanation."""
+YOUR ROLE:
+Synthesize legal information from statutes, case law, web sources, and agent analyses into a coherent, comprehensive, and accessible final response.
+
+CRITICAL REQUIREMENTS:
+1. COMPREHENSIVE SYNTHESIS: Integrate information from all agents (classification, knowledge retrieval, case analysis, reasoning, recommendations)
+2. UNIFIED NARRATIVE: Create a coherent, well-structured response that flows naturally
+3. CLARITY: Use simple, clear language accessible to non-lawyers while maintaining legal accuracy
+4. PRECISE CITATIONS: Cite specific sources (statutes, sections, cases, courts, years, web sources)
+5. TRANSPARENCY: Clearly distinguish what is known vs unknown, what is certain vs uncertain
+6. COMPLETENESS: Address all aspects of the user's query comprehensively
+7. STRUCTURE: Organize with clear sections, headings, and formatting
+8. SAFETY: Include appropriate disclaimers and NEVER provide legal advice or litigation strategy
+
+OUTPUT STRUCTURE:
+1. EXECUTIVE SUMMARY: Brief overview addressing the query
+2. LEGAL FRAMEWORK: Relevant statutes, acts, sections, and articles
+3. CASE LAW ANALYSIS: Precedents, court interpretations, and similar cases
+4. RECENT DEVELOPMENTS: Any recent updates, amendments, or changes from web sources
+5. PRACTICAL APPLICATION: How the law applies to the user's situation (informational)
+6. ACTIONABLE STEPS: Civic actions and recommendations (if available)
+7. LIMITATIONS & GAPS: What information is missing or requires further research
+8. IMPORTANT DISCLAIMERS: Clear statements about not providing legal advice
+
+QUALITY STANDARDS:
+- Accuracy: Only use information from provided sources
+- Completeness: Address all query aspects
+- Clarity: Plain language with minimal jargon
+- Transparency: Clear about source limitations
+- Safety: Appropriate disclaimers throughout"""
             
             result = groq_llm.generate_response(
                 prompt=f"{system_prompt}\n\n{prompt}",

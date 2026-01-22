@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
 from database.qdrant_client import qdrant_manager
 from utils.embeddings import get_embedding
+from utils.tavily_search import get_tavily_search
 
 
 class KnowledgeRetrievalAgent(BaseAgent):
@@ -72,15 +73,16 @@ class KnowledgeRetrievalAgent(BaseAgent):
         
         return AgentOutput(
             result={
-                "statutes": statutes,
-                "count": len(statutes)
+                "statutes": all_statutes,
+                "count": len(all_statutes)
             },
-            retrieved_documents=statute_results,
+            retrieved_documents=statute_results + web_statutes,
             confidence=float(confidence),
-            reasoning=f"Retrieved {len(statutes)} relevant statute(s) from legal corpus",
+            reasoning=f"Retrieved {len(statutes)} statute(s) from corpus and {len(web_statutes)} from web search",
             agent_name=self.name,
             metadata={
                 "domain_filter": primary_domain,
-                "collection": "statutes_vectors"
+                "collection": "statutes_vectors",
+                "web_search_used": len(web_statutes) > 0
             }
         )
