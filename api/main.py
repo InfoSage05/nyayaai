@@ -146,17 +146,32 @@ async def process_query(request: QueryRequest):
             return QueryResponse(
                 query=request.query,
                 explanation="An error occurred processing your query. Please try again.",
+                unified_summary="An error occurred processing your query. Please try again.",
                 error=result.get("error")
             )
+        
+        # Ensure either explanation or unified_summary is present
+        if not result.get("unified_summary") and not result.get("explanation"):
+            # If neither is present, use a default message
+            result["explanation"] = "Response generated successfully. Please review the retrieved information below."
+            result["unified_summary"] = result.get("explanation")
+        elif result.get("unified_summary") and not result.get("explanation"):
+            # If only unified_summary exists, use it as explanation for backward compatibility
+            result["explanation"] = result["unified_summary"]
+        elif result.get("explanation") and not result.get("unified_summary"):
+            # If only explanation exists, use it as unified_summary
+            result["unified_summary"] = result["explanation"]
         
         return QueryResponse(**result)
     
     except Exception as e:
         logger.error(f"Error processing query: {e}", exc_info=True)
         # Return valid response instead of raising exception
+        error_msg = "An unexpected error occurred. Please try again."
         return QueryResponse(
             query=request.query,
-            explanation="An unexpected error occurred. Please try again.",
+            explanation=error_msg,
+            unified_summary=error_msg,
             error=str(e)
         )
 

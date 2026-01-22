@@ -27,7 +27,7 @@ class GroqLLM:
             raise ValueError("GROQ_API_KEY not set in environment variables")
         
         self.client = Groq(api_key=self.api_key)
-        self.model = "mixtral-8x7b"
+        self.model = "llama-3.1-8b-instant"
         
         # Synthesis-focused system prompt
         self.system_prompt = """You are a LEGAL INFORMATION SYNTHESIS AGENT.

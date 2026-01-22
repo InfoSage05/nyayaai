@@ -109,16 +109,19 @@ class QueryResponse(BaseModel):
     query: str
     normalized_query: Optional[str] = None
     domains: List[str] = []
-    explanation: str
+    explanation: Optional[str] = None  # Made optional - can use unified_summary instead
+    unified_summary: Optional[str] = None  # New field from summarization agent
     statutes: List[Dict[str, Any]] = []
     cases: List[Dict[str, Any]] = []
+    similar_cases: List[Dict[str, Any]] = []  # Support both 'cases' and 'similar_cases'
     recommendations: List[Dict[str, Any]] = []
     ethics_check: Dict[str, Any] = {}
     case_id: Optional[str] = None
-    retrieval_evidence: Dict[str, int] = {}
+    retrieval_evidence: Dict[str, Any] = {}  # Changed from Dict[str, int] to Dict[str, Any]
     disclaimers: Dict[str, str] = {}
     error: Optional[str] = None
     errors: List[str] = []
+    generated_at: Optional[str] = None
 
 
 class MemoryRequest(BaseModel):
