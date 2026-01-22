@@ -1,0 +1,116 @@
+NYAYAAI ARCHITECTURE DIAGRAM
+=============================
+
+This is a text representation of the NyayaAI architecture.
+For a visual diagram, see architecture.drawio.xml (can be opened in draw.io)
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           USER INTERFACE                                 │
+│                    (FastAPI / Streamlit Frontend)                        │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      ORCHESTRATOR (LangGraph)                            │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │              Multi-Agent Workflow Pipeline                         │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└───┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬───────────────────┘
+    │      │      │      │      │      │      │      │
+    ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼
+┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+│Intake│ │Class │ │Know  │ │Case  │ │Reas  │ │Rec   │ │Ethics│
+│Agent │ │Agent │ │Agent │ │Agent │ │Agent │ │Agent │ │Agent │
+└──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘
+   │        │        │        │        │        │        │
+   └────────┴────────┴────────┴────────┴────────┴────────┘
+                       │
+                       ▼
+              ┌─────────────────┐
+              │  Memory Agent    │
+              └────────┬─────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        QDRANT VECTOR DATABASE                             │
+│                                                                           │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
+│  │legal_taxonomy_   │  │  statutes_       │  │  case_law_       │       │
+│  │vectors           │  │  vectors         │  │  vectors         │       │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘       │
+│                                                                           │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
+│  │civic_process_    │  │  case_memory_    │  │  user_interact   │       │
+│  │vectors           │  │  vectors         │  │  ion_memory      │       │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘       │
+└─────────────────────────────────────────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SUPPORTING SERVICES                                    │
+│                                                                           │
+│  ┌──────────────────────┐          ┌──────────────────────┐            │
+│  │  Embeddings          │          │  Ollama LLM          │            │
+│  │  (SentenceTransformers)        │  (Llama 3 / Mistral) │            │
+│  │  all-MiniLM-L6-v2    │          │                      │            │
+│  └──────────────────────┘          └──────────────────────┘            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+AGENT FLOW:
+===========
+
+1. User Query
+   │
+   ▼
+2. Intake Agent → Normalizes query, generates embedding
+   │
+   ▼
+3. Classification Agent → Identifies legal domain(s)
+   │
+   ▼
+4. Knowledge Agent → Retrieves relevant statutes
+   │
+   ▼
+5. Case Similarity Agent → Finds similar cases
+   │
+   ▼
+6. Reasoning Agent → Generates explanation (retrieval-bounded)
+   │
+   ▼
+7. Recommendation Agent → Suggests civic actions
+   │
+   ▼
+8. Ethics Agent → Validates safety and adds disclaimers
+   │
+   ▼
+9. Memory Agent → Stores case memory
+   │
+   ▼
+10. Final Response → Returns to user
+
+QDRANT COLLECTIONS:
+===================
+
+1. legal_taxonomy_vectors
+   - Legal domain taxonomy
+   - Used by: Classification Agent
+
+2. statutes_vectors
+   - Legal statutes and acts
+   - Used by: Knowledge Retrieval Agent
+
+3. case_law_vectors
+   - Case law and judgments
+   - Used by: Case Similarity Agent
+
+4. civic_process_vectors
+   - Civic processes and procedures
+   - Used by: Recommendation Agent
+
+5. case_memory_vectors
+   - Long-term case memory
+   - Used by: Memory Agent (store/retrieve)
+
+6. user_interaction_memory
+   - User interaction history
+   - Used by: Memory Agent (tracking)
