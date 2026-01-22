@@ -11,6 +11,7 @@ from agents.reasoning_agent import ReasoningAgent
 from agents.recommendation_agent import RecommendationAgent
 from agents.ethics_agent import EthicsAgent
 from agents.memory_agent import MemoryAgent
+from agents.summarization_agent import SummarizationAgent
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class NyayaOrchestrator:
         self.recommendation_agent = RecommendationAgent()
         self.ethics_agent = EthicsAgent()
         self.memory_agent = MemoryAgent()
+        self.summarization_agent = SummarizationAgent()
         
         # Build graph
         self.graph = self._build_graph()
@@ -55,6 +57,7 @@ class NyayaOrchestrator:
         workflow.add_node("recommendation", self._recommendation_node)
         workflow.add_node("ethics", self._ethics_node)
         workflow.add_node("memory", self._memory_node)
+        workflow.add_node("summarization", self._summarization_node)
         
         # Define edges
         workflow.set_entry_point("intake")
@@ -65,7 +68,8 @@ class NyayaOrchestrator:
         workflow.add_edge("reasoning", "recommendation")
         workflow.add_edge("recommendation", "ethics")
         workflow.add_edge("ethics", "memory")
-        workflow.add_edge("memory", END)
+        workflow.add_edge("memory", "summarization")
+        workflow.add_edge("summarization", END)
         
         return workflow
     
@@ -210,31 +214,62 @@ class NyayaOrchestrator:
             
             state["agent_outputs"]["memory"] = output
             
-            # Build final result
-            explanation = state["context"].get("explanation", "") or "Unable to generate explanation. Please review retrieved documents above."
-            state["final_result"] = {
-                "query": state["query"],
-                "normalized_query": state["context"].get("normalized_query"),
-                "domains": state["context"].get("domains", []),
-                "explanation": explanation,  # NEVER None or empty
-                "statutes": state["context"].get("statutes", []),
-                "cases": state["context"].get("similar_cases", []),
-                "recommendations": state["context"].get("recommendations", []),
-                "ethics_check": state["context"].get("ethics_check", {}),
-                "case_id": output.result.get("case_id") if output.result else None,
-                "retrieval_evidence": {
-                    "statutes_count": len(state["context"].get("statutes", [])),
-                    "cases_count": len(state["context"].get("similar_cases", [])),
-                    "recommendations_count": len(state["context"].get("recommendations", []))
-                },
-                "disclaimers": {
-                    "safety": state["context"].get("ethics_check", {}).get("safety_disclaimer", ""),
-                    "standard": state["context"].get("ethics_check", {}).get("standard_disclaimer", "")
-                }
-            }
+            # Pass agent_outputs to context for summarization agent
+            state["context"]["agent_outputs"] = state["agent_outputs"]
         except Exception as e:
             logger.error(f"Error in memory node: {e}")
             state["errors"].append(f"Memory error: {str(e)}")
+        return state
+    
+    def _summarization_node(self, state: AgentState) -> AgentState:
+        """Summarization agent node - generates unified final response."""
+        try:
+            # Prepare input for summarization agent
+            input_data = AgentInput(
+                query=state["query"],
+                context={
+                    **state["context"],
+                    "agent_outputs": state["agent_outputs"]
+                }
+            )
+            output = self.summarization_agent.process(input_data)
+            
+            state["agent_outputs"]["summarization"] = output
+            
+            # Use summarization result as final result
+            if output.result:
+                state["final_result"] = output.result
+                # Ensure case_id is included
+                if "case_id" not in state["final_result"]:
+                    memory_output = state["agent_outputs"].get("memory")
+                    if memory_output and hasattr(memory_output, "result") and memory_output.result:
+                        state["final_result"]["case_id"] = memory_output.result.get("case_id")
+            else:
+                # Fallback if summarization failed
+                explanation = state["context"].get("explanation", "") or "Unable to generate explanation."
+                state["final_result"] = {
+                    "query": state["query"],
+                    "unified_summary": explanation,
+                    "normalized_query": state["context"].get("normalized_query"),
+                    "domains": state["context"].get("domains", []),
+                    "statutes": state["context"].get("statutes", []),
+                    "similar_cases": state["context"].get("similar_cases", []),
+                    "recommendations": state["context"].get("recommendations", []),
+                    "retrieval_evidence": {
+                        "statutes_count": len(state["context"].get("statutes", [])),
+                        "cases_count": len(state["context"].get("similar_cases", [])),
+                        "recommendations_count": len(state["context"].get("recommendations", []))
+                    }
+                }
+        except Exception as e:
+            logger.error(f"Error in summarization node: {e}")
+            state["errors"].append(f"Summarization error: {str(e)}")
+            # Fallback final result
+            state["final_result"] = {
+                "query": state["query"],
+                "unified_summary": "Error generating unified response. Please try again.",
+                "error": str(e)
+            }
         return state
     
     def process_query(self, query: str, user_id: str = "anonymous") -> Dict[str, Any]:

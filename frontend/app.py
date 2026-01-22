@@ -301,7 +301,14 @@ def main():
             elif result.get('error'):
                 st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
             else:
-                display_results(result)
+                # Check for unified summary (new format) or explanation (old format)
+                has_summary = result.get('unified_summary') and result.get('unified_summary').strip()
+                has_explanation = result.get('explanation') and result.get('explanation').strip()
+                
+                if not has_summary and not has_explanation:
+                    st.warning("No response generated. The system may still be processing.")
+                else:
+                    display_results(result)
 
 
 def display_results(result: Dict[str, Any]):
@@ -410,13 +417,22 @@ def display_results(result: Dict[str, Any]):
                 st.markdown(f"**Recommendations:** {agent_trace.get('recommendation_count', 0)}")
     
     else:
-        # Legacy response format
-        st.markdown("### 📖 Legal Explanation")
+        # Legacy response format - unified summary or explanation
+        st.markdown("---")
+        
+        # Unified Summary (from summarization agent) - PRIMARY CONTENT
+        unified_summary = result.get('unified_summary', '')
+        if unified_summary:
+            st.markdown("### 📖 Unified Legal Response")
+            st.markdown(unified_summary)
+            st.markdown("---")
+        
+        # Legacy explanation (for backward compatibility)
         explanation = result.get('explanation', '')
-        if explanation:
+        if explanation and not unified_summary:
+            st.markdown("### 📖 Legal Explanation")
             st.markdown(explanation)
-        else:
-            st.warning("No explanation generated.")
+            st.markdown("---")
         
         # Statutes
         statutes = result.get('statutes', [])
@@ -427,27 +443,72 @@ def display_results(result: Dict[str, Any]):
                     st.markdown(f"**Act:** {statute.get('act_name', 'N/A')}")
                     st.markdown(f"**Section:** {statute.get('section', 'N/A')}")
                     st.markdown(f"**Content:** {statute.get('content', 'N/A')}")
+                    if statute.get('score'):
+                        st.markdown(f"**Similarity Score:** {statute.get('score', 0):.3f}")
         
-        # Cases
-        cases = result.get('cases', [])
+        # Cases (support both 'cases' and 'similar_cases' keys)
+        cases = result.get('similar_cases', result.get('cases', []))
         if cases:
             st.markdown("### ⚖️ Similar Cases")
             for i, case in enumerate(cases[:3], 1):
-                with st.expander(f"{i}. {case.get('case_name', 'N/A')}"):
-                    st.markdown(f"**Court:** {case.get('court', 'N/A')}")
-                    st.markdown(f"**Summary:** {case.get('summary', 'N/A')}")
+                case_name = case.get('case_name', 'N/A')
+                year = case.get('year', 'N/A')
+                with st.expander(f"{i}. {case_name} ({year})"):
+                    if case.get('case_context'):
+                        st.markdown(f"**Context:** {case.get('case_context', 'N/A')}")
+                    if case.get('what_happened'):
+                        st.markdown(f"**What Happened:** {case.get('what_happened', 'N/A')}")
+                    if case.get('outcome'):
+                        st.markdown(f"**Outcome:** {case.get('outcome', 'N/A')}")
+                    if case.get('relevance_to_query'):
+                        st.markdown(f"**Relevance:** {case.get('relevance_to_query', 'N/A')}")
+                    # Legacy fields
+                    if case.get('court'):
+                        st.markdown(f"**Court:** {case.get('court', 'N/A')}")
+                    if case.get('citation'):
+                        st.markdown(f"**Citation:** {case.get('citation', 'N/A')}")
+                    if case.get('summary'):
+                        st.markdown(f"**Summary:** {case.get('summary', 'N/A')}")
+                    if case.get('confidence'):
+                        st.markdown(f"**Confidence:** {case.get('confidence', 0):.3f}")
         
         # Recommendations
         recommendations = result.get('recommendations', [])
         if recommendations:
             st.markdown("### 🎯 Civic Action Recommendations")
             for i, rec in enumerate(recommendations[:3], 1):
-                with st.expander(f"{i}. {rec.get('action', 'N/A')}"):
-                    st.markdown(f"**Description:** {rec.get('description', 'N/A')}")
+                action = rec.get('action', 'N/A')
+                with st.expander(f"{i}. {action}"):
+                    if rec.get('why_this_matters'):
+                        st.markdown(f"**Why This Matters:** {rec.get('why_this_matters', 'N/A')}")
+                    if rec.get('next_step'):
+                        st.markdown(f"**Next Step:** {rec.get('next_step', 'N/A')}")
+                    # Support both new and legacy field names
+                    authority = rec.get('responsible_authority') or rec.get('authority', 'N/A')
+                    timeline = rec.get('estimated_timeline') or rec.get('timeline', 'N/A')
+                    st.markdown(f"**Responsible Authority:** {authority}")
+                    st.markdown(f"**Estimated Timeline:** {timeline}")
+                    # Legacy fields
+                    if rec.get('description'):
+                        st.markdown(f"**Description:** {rec.get('description', 'N/A')}")
                     if rec.get('steps'):
                         st.markdown("**Steps:**")
                         for step in rec['steps']:
                             st.markdown(f"- {step}")
+                    if rec.get('cost'):
+                        st.markdown(f"**Cost:** {rec.get('cost', 'N/A')}")
+        
+        # Retrieval Evidence
+        evidence = result.get('retrieval_evidence', {})
+        if evidence:
+            st.markdown("---")
+            st.markdown("### 📚 Retrieval Evidence")
+            if evidence.get('statutes_count'):
+                st.markdown(f"**Statutes Found:** {evidence.get('statutes_count', 0)}")
+            if evidence.get('cases_count'):
+                st.markdown(f"**Cases Found:** {evidence.get('cases_count', 0)}")
+            if evidence.get('recommendations_count'):
+                st.markdown(f"**Recommendations:** {evidence.get('recommendations_count', 0)}")
     
     # Case ID footer
     if result.get('case_id'):

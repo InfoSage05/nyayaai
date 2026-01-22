@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         case_sensitive = False
+        # Make .env file optional - don't fail if it doesn't exist
+        env_file_encoding = "utf-8"
 
 
 # Global settings instance
