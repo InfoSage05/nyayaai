@@ -1,20 +1,5 @@
 # NyayaAI Setup Guide
 
-✅ **Ollama → Groq Migration Complete**
-- Replaced local Ollama with cloud-based Groq LLM
-- Improved reliability and speed
-- Better fallback error handling
-
-✅ **Error Handling Enhanced**
-- "Error: None" completely fixed with 5-layer fallback system
-- System never crashes, always returns sensible responses
-- Production-ready error handling
-
-✅ **Database Pre-populated**
-- Vectors already stored in Qdrant
-- Sample legal data ready to use
-- No need to re-ingest unless adding new data
-
 ## ⚡ Quick Start (5 minutes)
 
 If you already have Docker and Python 3.11+ installed:

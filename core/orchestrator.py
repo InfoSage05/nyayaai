@@ -13,6 +13,7 @@ from agents.ethics_agent import EthicsAgent
 from agents.memory_agent import MemoryAgent
 from agents.summarization_agent import SummarizationAgent
 from agents.web_search_agent import WebSearchAgent
+from agents.router_agent import RouterAgent
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class NyayaOrchestrator:
             self.memory_agent = MemoryAgent()
             self.summarization_agent = SummarizationAgent()
             self.web_search_agent = WebSearchAgent()
+            self.router_agent = RouterAgent()  # New: Intelligent query router
             
             # Build graph
             self.graph = self._build_graph()
@@ -190,9 +192,15 @@ class NyayaOrchestrator:
             
             # Create a dummy agent output for compatibility
             from core.agent_base import AgentOutput
+            
+            # Convert confidence_level string to float
+            confidence_map = {"low": 0.3, "medium": 0.6, "high": 0.8}
+            confidence_str = synthesis_result.get("confidence_level", "medium")
+            confidence_float = confidence_map.get(confidence_str, 0.5) if isinstance(confidence_str, str) else float(confidence_str)
+            
             output = AgentOutput(
                 result=synthesis_result,
-                confidence=synthesis_result.get("confidence_level", "medium"),
+                confidence=confidence_float,
                 reasoning="Synthesized all evidence into comprehensive response",
                 agent_name="groq_synthesis"
             )
@@ -340,6 +348,143 @@ class NyayaOrchestrator:
                 "query": query,
                 "error": str(e),
                 "errors": initial_state.get("errors", [])
+            }
+
+    def process_query_smart(self, query: str, user_id: str = "anonymous") -> Dict[str, Any]:
+        """SMART: Process query using router for intelligent agent selection.
+        
+        Uses RouterAgent to classify query type and only runs relevant agents.
+        This is faster and produces better focused responses.
+        
+        Args:
+            query: User query string
+            user_id: Optional user identifier
+            
+        Returns:
+            Structured response with LLM synthesis
+        """
+        from llm.groq_client import groq_llm
+        from datetime import datetime
+        import uuid
+        
+        try:
+            logger.info(f"🚀 Smart query processing: {query[:50]}...")
+            
+            # Step 1: Route the query
+            router_input = AgentInput(query=query)
+            router_output = self.router_agent.process(router_input)
+            
+            query_type = router_output.result.get("query_type", "legal_info")
+            skip_agents = set(router_output.result.get("skip_agents", []))
+            
+            logger.info(f"📍 Query type: {query_type}, Skipping: {skip_agents}")
+            
+            # Step 2: Initialize state
+            context = {"user_id": user_id, "query_type": query_type}
+            agent_outputs = {"router": router_output}
+            
+            # Step 3: Always run intake
+            intake_input = AgentInput(query=query)
+            intake_output = self.intake_agent.process(intake_input)
+            context["normalized_query"] = intake_output.result.get("normalized_query")
+            context["embedding"] = intake_output.result.get("embedding")
+            agent_outputs["intake"] = intake_output
+            
+            # Step 4: Run classification if not skipped
+            if "classification" not in skip_agents:
+                class_input = AgentInput(query=query, context=context)
+                class_output = self.classification_agent.process(class_input)
+                context["domains"] = class_output.result.get("domains", [])
+                context["primary_domain"] = class_output.result.get("primary_domain", "general")
+                agent_outputs["classification"] = class_output
+            
+            # Step 5: Conditional agent execution based on query type
+            
+            # Knowledge retrieval (for legal_info, civic_action)
+            if "knowledge_retrieval" not in skip_agents:
+                know_input = AgentInput(query=query, context=context)
+                know_output = self.knowledge_agent.process(know_input)
+                context["statutes"] = know_output.result.get("statutes", [])
+                agent_outputs["knowledge"] = know_output
+            
+            # Case similarity (for case_search)
+            if "case_similarity" not in skip_agents:
+                case_input = AgentInput(query=query, context=context)
+                case_output = self.case_agent.process(case_input)
+                context["similar_cases"] = case_output.result.get("similar_cases", [])
+                agent_outputs["case_similarity"] = case_output
+            
+            # Web search (for web_search type)
+            if "web_search" not in skip_agents:
+                web_input = AgentInput(query=query, context=context)
+                web_output = self.web_search_agent.process(web_input)
+                context["web_search_results"] = web_output.result.get("web_results", [])
+                agent_outputs["web_search"] = web_output
+            
+            # Recommendations (for civic_action)
+            if "recommendation" not in skip_agents:
+                rec_input = AgentInput(query=query, context=context)
+                rec_output = self.recommendation_agent.process(rec_input)
+                context["recommendations"] = rec_output.result.get("recommendations", [])
+                agent_outputs["recommendation"] = rec_output
+            
+            # Step 6: Always run LLM synthesis
+            if groq_llm:
+                synthesis = groq_llm.synthesize_legal_answer(
+                    query=query,
+                    retrieved_statutes=context.get("statutes", []),
+                    similar_cases=context.get("similar_cases", []),
+                    web_search_results=context.get("web_search_results", []),
+                    temperature=0.3,
+                    max_tokens=2000
+                )
+            else:
+                synthesis = {
+                    "summary": "LLM unavailable. Retrieved information displayed below.",
+                    "confidence_level": "low"
+                }
+            
+            # Step 7: Build response
+            agents_used = list(agent_outputs.keys())
+            
+            return {
+                "case_id": str(uuid.uuid4()),
+                "query": query,
+                "query_type": query_type,
+                "llm_reasoned_answer": {
+                    "summary": synthesis.get("summary", synthesis.get("plain_language_explanation", "")),
+                    "confidence_level": synthesis.get("confidence_level", "medium"),
+                    "full_response": synthesis.get("full_response", ""),
+                    "what_law_says": synthesis.get("what_law_says", ""),
+                    "what_you_can_consider": synthesis.get("what_you_can_consider", ""),
+                    "disclaimer": synthesis.get("disclaimer", "This is legal information, not legal advice.")
+                },
+                "retrieved_evidence": {
+                    "statutes": context.get("statutes", [])[:5],
+                    "cases": context.get("similar_cases", [])[:5],
+                    "web_results": context.get("web_search_results", [])[:3],
+                    "total_count": len(context.get("statutes", [])) + len(context.get("similar_cases", []))
+                },
+                "recommendations": context.get("recommendations", [])[:5],
+                "agent_trace": {
+                    "query_type": query_type,
+                    "agents_used": agents_used,
+                    "agents_skipped": list(skip_agents),
+                    "classification_method": router_output.metadata.get("classification_method", "unknown")
+                },
+                "generated_at": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in smart query processing: {e}", exc_info=True)
+            return {
+                "case_id": str(uuid.uuid4()),
+                "query": query,
+                "error": str(e),
+                "llm_reasoned_answer": {"summary": f"Error: {e}", "confidence_level": "low"},
+                "retrieved_evidence": {"statutes": [], "cases": [], "total_count": 0},
+                "recommendations": [],
+                "agent_trace": {"error": str(e)}
             }
 
     def process_query_structured(self, query: str, user_id: str = "anonymous") -> Dict[str, Any]:

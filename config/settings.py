@@ -3,7 +3,9 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 import logging
+from dotenv import load_dotenv
 
+load_dotenv()  # Load .env file if it exists
 logger = logging.getLogger(__name__)
 
 
@@ -16,11 +18,11 @@ class Settings(BaseSettings):
     qdrant_api_key: Optional[str] = None
     
     # Groq Configuration
-    groq_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = os.environ.get("GROQ_API_KEY")
     
     # Tavily Search Configuration
-    tavily_api_key: Optional[str] = None
-    
+    tavily_api_key: Optional[str] = os.environ.get("TAVILY_SEARCH_KEY")
+
     # Embedding Model
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     
@@ -35,6 +37,7 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = False
         env_ignore_empty = True
+        extra = "ignore"  # Allow extra env vars without validation error
 
 
 # Global settings instance - handle .env file errors gracefully

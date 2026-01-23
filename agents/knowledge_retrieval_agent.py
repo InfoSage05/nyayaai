@@ -1,7 +1,7 @@
 """Legal Knowledge Retrieval Agent - Retrieves relevant statutes and laws."""
 from typing import Dict, Any, List
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
-from database.qdrant_client import qdrant_manager
+from database.qdrant_db import qdrant_manager
 from utils.embeddings import get_embedding
 from utils.tavily_search import get_tavily_search
 

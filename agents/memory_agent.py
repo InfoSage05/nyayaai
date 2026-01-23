@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 from datetime import datetime
 import uuid
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
-from database.qdrant_client import qdrant_manager
+from database.qdrant_db import qdrant_manager
 from utils.embeddings import get_embedding
 from qdrant_client.models import PointStruct
 

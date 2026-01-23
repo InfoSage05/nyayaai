@@ -1,7 +1,7 @@
 """Civic Action Recommendation Agent - Structured, actionable recommendations."""
 from typing import Dict, Any, List, Set
 from core.agent_base import BaseAgent, AgentInput, AgentOutput
-from database.qdrant_client import qdrant_manager
+from database.qdrant_db import qdrant_manager
 from utils.embeddings import get_embedding
 from llm.groq_client import groq_llm
 import logging

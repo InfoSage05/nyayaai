@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from config.settings import settings
 # Orchestrator is initialized lazily via _init_orchestrator() in endpoints
-from database.qdrant_client import qdrant_manager
+from database.qdrant_db import qdrant_manager
 from api.schemas import (
     QueryRequest, QueryResponse, MemoryRequest, MemoryResponse, 
     HealthResponse, StructuredQueryResponse
@@ -55,6 +55,86 @@ async def health_check():
         version=settings.app_version,
         qdrant_connected=qdrant_connected
     )
+
+
+@app.post("/api/v1/query/simple", tags=["Query"])
+async def process_query_simple(request: QueryRequest):
+    """SIMPLE: RAG + Web Search + ONE LLM call.
+    
+    This is the fastest and most reliable endpoint.
+    - Retrieves from Qdrant (top 3 docs)
+    - Searches web via Tavily (top 3 results)
+    - Makes ONE LLM call with all context
+    - Returns human-friendly response
+    
+    NO multi-agent chaining. NO multiple LLM calls.
+    """
+    try:
+        logger.info(f"Processing simple query: {request.query[:100]}...")
+        
+        from core.simple_pipeline import query
+        result = query(
+            user_query=request.query,
+            user_id=request.user_id or "anonymous"
+        )
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error in simple query: {e}", exc_info=True)
+        from datetime import datetime
+        import uuid
+        return {
+            "case_id": str(uuid.uuid4()),
+            "query": request.query,
+            "response": f"I apologize, but an error occurred: {e}\n\nPlease try again.",
+            "sources": {"database_docs": 0, "web_results": 0, "retrieval_status": "error"},
+            "error": str(e),
+            "generated_at": datetime.now().isoformat()
+        }
+
+
+@app.post("/api/v1/query/smart", tags=["Query"])
+async def process_query_smart(request: QueryRequest):
+    """SMART: Process query with intelligent agent routing.
+    
+    Uses RouterAgent to classify query and only run relevant agents.
+    - legal_info: Knowledge retrieval + LLM
+    - case_search: Case similarity + LLM
+    - civic_action: Recommendations + LLM  
+    - web_search: Web search + LLM
+    - simple_qa: LLM only
+    
+    This endpoint is FASTER and produces more focused responses.
+    """
+    try:
+        logger.info(f"Processing smart query: {request.query[:100]}...")
+        
+        from core.orchestrator import _init_orchestrator
+        global orchestrator
+        orchestrator = _init_orchestrator()
+        
+        result = orchestrator.process_query_smart(
+            query=request.query,
+            user_id=request.user_id or "anonymous"
+        )
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error processing smart query: {e}", exc_info=True)
+        from datetime import datetime
+        import uuid
+        return {
+            "case_id": str(uuid.uuid4()),
+            "query": request.query,
+            "error": str(e),
+            "llm_reasoned_answer": {"summary": f"Error: {e}", "confidence_level": "low"},
+            "retrieved_evidence": {"statutes": [], "cases": [], "total_count": 0},
+            "recommendations": [],
+            "agent_trace": {"error": str(e)},
+            "generated_at": datetime.now().isoformat()
+        }
 
 
 @app.post("/api/v1/query/structured", response_model=StructuredQueryResponse, tags=["Query"])
