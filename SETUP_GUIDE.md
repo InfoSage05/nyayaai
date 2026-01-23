@@ -21,13 +21,13 @@ pip install -r requirements.txt
 # 5. Set your Groq API key
 echo "GROQ_API_KEY=your_key_here" > .env
 
-# 6. Initialize database (one-time)
-python -m database.setup_collections
+# 6. Initialize database & Ingest Real Data (NEW)
+python database/ingest_multimodal.py
+# Press '1' to ingest real legal data (Acts, Cases, Forms, Videos)
 
-# 7. Run everything! (Open 3 terminals)
-Terminal 1: docker compose up qdrant
-Terminal 2: uvicorn api.main:app --reload --port 8000
-Terminal 3: streamlit run frontend/app.py
+# 7. Run everything! (Open 2 terminals)
+Terminal 1: python main.py
+Terminal 2: streamlit run frontend/app.py
 
 # Done! Access at http://localhost:8501
 ```
@@ -39,7 +39,7 @@ For detailed instructions, see the complete guide below.
 ## Prerequisites
 1. **Docker & Docker Compose** - For running Qdrant
 2. **Python 3.11+** - For running the application
-3. **Groq API Key** - For LLM inference (cloud-based)
+3. **Groq API Key** - For LLM inference (cloud-based, free tier available)
    - Sign up at: https://console.groq.com
    - Get your API key from the dashboard
 
@@ -110,53 +110,51 @@ QDRANT_PORT=6333
 
 **Important**: Replace `your_actual_groq_api_key_here` with your actual Groq API key from Step 1.
 
-### 5. Initialize Qdrant Collections
+### 5. Initialize & Ingest Real Data (Recommended)
+
+This single script creates the new `multimodal_legal_data` collection and ingests real Indian legal documents.
 
 ```bash
 # Ensure virtual environment is activated
 myenv\Scripts\activate
 
-# Initialize collections (one-time setup)
-python -m database.setup_collections
+# Run the multimodal ingestion script
+python database/ingest_multimodal.py
 ```
 
-**Important**: Collections may already exist from previous setup. The script will:
-- ✓ Create missing collections
-- ✓ Skip existing collections (no error)
-- ✓ Show status of all collections
+It will prompt you:
+```
+Choose data source:
+1. Real legal data (India Code, Landmark Cases, Forms, Videos)
+2. Sample multimodal data
+
+Enter choice (1 or 2, default=1): 1
+```
+
+**Choose '1'** to fetch and store:
+- **Acts**: RTI, Consumer Protection, CrPC, IPC
+- **Cases**: Landmark judgments (Kesavananda, Vishaka)
+- **Forms**: Official templates (RTI, FIR, Consumer Complaint)
+- **Videos**: Educational content descriptions
 
 Expected output:
 ```
-INFO: Collection legal_taxonomy_vectors already exists
-INFO: Collection statutes_vectors already exists
-... (more collections)
-INFO: Collection setup complete!
-```
-
-**Note**: If Qdrant is not running, you'll get an SSL error. Make sure Docker is running and Qdrant started (Step 2).
-INFO: Setting up collection: legal_taxonomy_vectors
-INFO: ✓ Collection 'legal_taxonomy_vectors' ready
+INFO: ✓ Ingested [text]: Right to Information Act, 2005 - Key Sections
+INFO: ✓ Ingested [video]: How to File an FIR - Video Guide
 ...
-INFO: Collection setup complete!
+INFO: ✓ Ingested 18/18 multimodal documents
+INFO: ✅ Multimodal ingestion complete!
 ```
 
-### 6. Ingest Sample Data (Optional)
+### 6. Initialize Legacy Collections (Optional)
 
-**Note**: If you already have data in Qdrant from previous runs, you can skip this step.
+If you plan to use the legacy multi-agent pipeline (not recommended for simple use), run:
 
 ```bash
-# Ingest sample legal data
+python -m database.setup_collections
 python -m database.ingest_sample_data
 ```
 
-Expected output:
-```
-INFO: Starting sample data ingestion...
-INFO: Ingesting legal taxonomy data...
-INFO: ✓ Ingested 9 taxonomy entries
-...
-INFO: Sample data ingestion complete!
-```
 
 ### 7. (Optional) Extend Data Using Connectors
 

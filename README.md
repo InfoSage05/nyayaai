@@ -13,25 +13,37 @@ NyayaAI is a multi-agent AI system that uses Qdrant vector search to provide:
 
 ## Architecture
 
-The system consists of 8 specialized agents:
+The system now offers two pipelines:
 
-1. **Intake & Normalization Agent**: Processes and normalizes user queries
-2. **Legal Domain Classification Agent**: Classifies queries into legal domains
-3. **Legal Knowledge Retrieval Agent**: Retrieves relevant statutes and laws
-4. **Case Similarity Agent**: Finds similar past cases
-5. **Legal Reasoning Agent**: Provides retrieval-bounded legal reasoning
-6. **Civic Action Recommendation Agent**: Recommends actionable civic steps
-7. **Ethics & Safety Agent**: Monitors outputs for safety and ethics
-8. **Long-Term Case Memory Agent**: Manages persistent case memory
+1.  **Simplified Pipeline (Recommended)**:
+    *   **Architecture**: RAG (Qdrant) + Web Search (Tavily) + ONE LLM Call (Groq)
+    *   **Features**:
+        *   **Multimodal Retrieval**: Searches Text, PDF, Images, Audio, Video, Code, and Forms
+        *   **Fast**: Single LLM call ensures low latency (~2-3s)
+        *   **Reliable**: No complex agent chaining failures
+        *   **Clear**: Displays source-grounded answers directly
+
+2.  **Legacy Multi-Agent Pipeline (Advanced)**:
+    *   Complex LangGraph orchestration with 8 specialized agents
+    *   Best for deep research requiring multi-step reasoning
+
+## Key Features
+
+*   **Multimodal Search**: Retrieve laws, cases, forms, and educational videos in one go.
+*   **Real Legal Data**: Includes statutes (India Code), landmark judgments (Supreme Court), and official forms.
+*   **Simple & Fast**: Designed for immediate, helpful answers without agent overhead.
+*   **Semantic Search**: Qdrant vector database understands legal context.
+*   ** Civic Guidance**: Provides practical "Next Steps" alongside legal info.
 
 ## Tech Stack
 
-- **Backend**: Python 3.11+, FastAPI, Pydantic
-- **Orchestration**: LangGraph
-- **Vector DB**: Qdrant (Docker)
+- **Backend**: Python 3.11+, FastAPI
+- **Pipeline**: Simplified RAG + Multi-Modal Qdrant
+- **Vector DB**: Qdrant (Docker) - Stores Text, Audio, Video metadata
 - **Embeddings**: SentenceTransformers (all-MiniLM-L6-v2)
-- **LLM**: Ollama (Llama 3 / Mistral)
-- **Frontend**: Streamlit (minimal)
+- **LLM**: Groq (Llama3-70b/8b) - Fast inference
+- **Web Search**: Tavily API
+- **Frontend**: Streamlit
 
 ## Quick Start
 
