@@ -16,234 +16,217 @@ import uuid
 logger = logging.getLogger(__name__)
 
 
-def build_context(query: str) -> Dict[str, Any]:
+# =============================================================================
+# ADAPTIVE RAG HELPERS
+# =============================================================================
+
+def _analyze_query_intent(query: str) -> Dict[str, Any]:
     """
-    Build context from Qdrant (RAG) and Tavily (Web Search).
+    Step 1: Lightweight Query Analysis (Heuristic).
+    Determines if query needs external sources and its type.
+    """
+    query_lower = query.lower()
     
-    Returns:
-        {
-            "retrieved_docs": [...],
-            "web_results": [...],
-            "retrieval_status": "hit" | "miss"
-        }
-    
-    NEVER blocks if retrieval is empty.
+    # Intent Classification
+    intent = "general"
+    if any(k in query_lower for k in ["how to", "process", "steps", "procedure", "file", "apply"]):
+        intent = "procedural"
+    elif any(k in query_lower for k in ["what is", "define", "meaning", "concept", "rights", "law"]):
+        intent = "informational"
+        
+    # Source Needs Analysis
+    # (Almost all legal queries benefit from sources, but simple greetings don't)
+    needs_sources = True
+    if len(query.split()) < 3 and any(k in query_lower for k in ["hi", "hello", "thanks", "bye"]):
+        needs_sources = False
+        
+    return {
+        "intent": intent,
+        "needs_sources": needs_sources
+    }
+
+def build_adaptive_context(query: str) -> Dict[str, Any]:
+    """
+    Step 2-4: Adaptive Retrieval & Context Building.
+    - Vector Search (Qdrant)
+    - Conditional Web Search (Tavily) if retrieval is weak
     """
     from database.qdrant_db import qdrant_manager
-    from utils.embeddings import get_embedding
     from utils.tavily_search import get_tavily_search
     
     context = {
+        "query": query,
         "retrieved_docs": [],
         "web_results": [],
-        "retrieval_status": "miss"
+        "context_source": "general"
     }
     
-    # Step 1: Qdrant retrieval (RAG)
-    try:
-        logger.info(f"📚 Retrieving from Qdrant: {query[:50]}...")
-        query_embedding = get_embedding(query)
-        
-        # Search statutes
-        statutes = qdrant_manager.search(
-            collection_name="statutes_vectors",
-            query_vector=query_embedding,
-            limit=3,
-            score_threshold=0.5
-        )
-        
-        # Search case law
-        cases = qdrant_manager.search(
-            collection_name="case_law_vectors",
-            query_vector=query_embedding,
-            limit=3,
-            score_threshold=0.5
-        )
-        
-        # Search multimodal collection (PDFs, images, audio, video, code, forms)
-        multimodal_docs = []
-        try:
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
-            
-            multimodal_results = qdrant_manager.client.search(
-                collection_name="multimodal_legal_data",
-                query_vector=query_embedding,
-                limit=3,
-                score_threshold=0.4
-            )
-            multimodal_docs = [
-                {"payload": r.payload, "score": r.score}
-                for r in multimodal_results
-            ]
-            logger.info(f"✓ Found {len(multimodal_docs)} multimodal documents")
-        except Exception as e:
-            logger.debug(f"Multimodal collection not available: {e}")
-        
-        # Combine results
-        for s in statutes:
-            payload = s.get("payload", {})
-            context["retrieved_docs"].append({
-                "type": "statute",
-                "title": payload.get("title", payload.get("name", "Legal Document")),
-                "content": payload.get("content", payload.get("summary", ""))[:500],
-                "source": payload.get("source", "Indian Law"),
-                "score": s.get("score", 0)
-            })
-        
-        for c in cases:
-            payload = c.get("payload", {})
-            context["retrieved_docs"].append({
-                "type": "case",
-                "title": payload.get("case_name", "Court Case"),
-                "content": payload.get("summary", payload.get("content", ""))[:500],
-                "source": payload.get("citation", payload.get("court", "Court")),
-                "score": c.get("score", 0)
-            })
-        
-        # Add multimodal documents with data_type metadata
-        for m in multimodal_docs:
-            payload = m.get("payload", {})
-            data_type = payload.get("data_type", "text")
-            context["retrieved_docs"].append({
-                "type": data_type,  # pdf, image, audio, video, code, form
-                "title": payload.get("title", "Document"),
-                "content": payload.get("content", "")[:500],
-                "source": payload.get("source", ""),
-                "category": payload.get("category", ""),
-                "metadata": {k: v for k, v in payload.items() 
-                           if k not in ["title", "content", "source", "data_type", "category", "id"]},
-                "score": m.get("score", 0)
-            })
-        
-        if context["retrieved_docs"]:
-            context["retrieval_status"] = "hit"
-            logger.info(f"✓ Retrieved {len(context['retrieved_docs'])} documents from Qdrant")
-        else:
-            logger.info("⚠ No documents found in Qdrant")
-            
-    except Exception as e:
-        logger.warning(f"Qdrant retrieval error (continuing): {e}")
+    # 1. Query Analysis
+    analysis = _analyze_query_intent(query)
+    context["intent"] = analysis["intent"]
     
-    # Step 2: Web Search (Tavily)
+    if not analysis["needs_sources"]:
+        return context
+
+    # 2. Vector Retrieval (Qdrant)
     try:
-        logger.info(f"🌐 Searching web: {query[:50]}...")
-        tavily = get_tavily_search()
+        from utils.embeddings import get_embedding
         
+        # Generate query embedding first
+        query_embedding = get_embedding(query)
+        logger.info(f"📚 Searching Qdrant with embedding...")
+        
+        # Search existing collections
+        results = []
+        collections_to_try = ["multimodal_legal_data", "legal_taxonomy_vectors", "statutes_vectors", "unified_legal_vectors"]
+        
+        for coll in collections_to_try:
+            try:
+                results = qdrant_manager.search(
+                    collection_name=coll,
+                    query_vector=query_embedding,
+                    limit=5,
+                    score_threshold=0.2  # Lower threshold to get more results
+                )
+                if results:
+                    logger.info(f"✓ Found {len(results)} docs in {coll}")
+                    break
+            except Exception as coll_err:
+                logger.debug(f"Collection {coll} not available: {coll_err}")
+                continue
+             
+        # Format results
+        for r in results:
+             payload = r.get("payload", {})
+             context["retrieved_docs"].append({
+                 "title": payload.get("title", payload.get("name", "Document")),
+                 "content": payload.get("content", payload.get("chunk_text", payload.get("summary", "")))[:600],
+                 "source": payload.get("source", payload.get("source_name", "Internal DB")),
+                 "score": r.get("score", 0)
+             })
+        
+        logger.info(f"✓ Retrieved {len(context['retrieved_docs'])} documents from Qdrant")
+             
+    except Exception as e:
+        logger.warning(f"Vector search failed: {e}")
+
+    # 3. Web Search (Always run alongside DB retrieval)
+    logger.info("🌐 Running Web Search...")
+    try:
+        tavily = get_tavily_search()
         if tavily:
-            web_results = tavily.search_legal_info(query, max_results=3)
-            
-            for w in web_results:
+            web_hits = tavily.search_legal_info(query, max_results=3)
+            for w in web_hits:
+                # Handle both structure types from Tavily
                 if w.get("is_answer"):
-                    # AI-generated answer from Tavily
-                    context["web_results"].append({
+                     context["web_results"].append({
                         "title": "Web Summary",
                         "content": w.get("content", "")[:500],
-                        "url": None,
-                        "is_ai_summary": True
-                    })
+                        "url": None
+                     })
                 else:
                     context["web_results"].append({
                         "title": w.get("title", "Web Source"),
-                        "content": w.get("content", "")[:400],
+                        "content": w.get("content", "")[:500],
                         "url": w.get("url"),
-                        "is_ai_summary": False
                     })
-            
-            if context["web_results"]:
-                logger.info(f"✓ Found {len(context['web_results'])} web results")
-        else:
-            logger.info("⚠ Tavily not available")
-            
+            logger.info(f"✓ Found {len(context['web_results'])} web results")
     except Exception as e:
-        logger.warning(f"Web search error (continuing): {e}")
-    
+        logger.warning(f"Web search failed: {e}")
+            
+    # Set final source type
+    if context["retrieved_docs"] and context["web_results"]:
+        context["context_source"] = "hybrid"
+    elif context["retrieved_docs"]:
+        context["context_source"] = "database"
+    elif context["web_results"]:
+        context["context_source"] = "web"
+        
     return context
 
 
 def query(user_query: str, user_id: str = "anonymous") -> Dict[str, Any]:
     """
-    Process a query with ONE LLM call.
-    
-    Pipeline:
-    1. Build context (Qdrant + Tavily)
-    2. Send to LLM with system prompt
-    3. Return response
-    
-    NO multi-agent chaining. NO summarization agents.
+    Process a query with ADAPTIVE RAG (Single LLM Call).
     """
     from llm.groq_client import groq_llm
     
     try:
-        logger.info(f"🚀 Simple query: {user_query[:50]}...")
+        logger.info(f"🚀 Adaptive Query: {user_query[:50]}...")
         
-        # Step 1: Build context
-        context = build_context(user_query)
+        # 1. Initialize Memory
+        _init_memory_collection()
         
-        # Step 2: Format context for LLM
-        db_context = _format_db_context(context["retrieved_docs"])
-        web_context = _format_web_context(context["web_results"])
+        # 2. Build Adaptive Context
+        context = build_adaptive_context(user_query)
         
-        # Step 3: Build the ONE prompt
-        system_prompt = """You are a helpful legal & civic information assistant for India.
-You explain things clearly in simple language that anyone can understand.
-You use retrieved documents and web results when provided.
-If no documents are found, you still answer using general public knowledge about Indian law.
-You do NOT give legal advice - only information.
-You are friendly, helpful, and thorough."""
+        # 3. Get Memory Context
+        memory_context = _get_memory_context(user_id, user_query)
+        
+        # 4. Format for Prompt
+        db_text = "\n\n".join([f"Source: {d['title']}\nContent: {d.get('content', '')[:600]}" for d in context["retrieved_docs"]])
+        web_text = "\n\n".join([f"Source: {d['title']} ({d.get('url', 'No URL')})\nContent: {d.get('content', '')[:600]}" for d in context["web_results"]])
+        
+        # 5. Single LLM Generation (Adaptive RAG Prompt)
+        system_prompt = """You are a helpful legal & civic information assistant.
+You explain concepts clearly in simple language.
+You use provided documents and web results when available.
+If none are available, you rely on general public knowledge.
+You do NOT provide legal advice."""
 
-        user_prompt = f"""USER QUESTION:
-{user_query}
+        user_prompt = f"""USER QUERY: {user_query}
 
-INTERNAL DATABASE RESULTS:
-{db_context if db_context else 'None found'}
+INTENT: {context['intent']}
 
-WEB SEARCH RESULTS:
-{web_context if web_context else 'None found'}
+RETRIEVED DOCUMENTS (Internal DB):
+{db_text if db_text else 'None retrieved (Weak match).'}
 
-TASK:
-1. Explain the topic simply (like a helpful assistant would)
-2. If database info exists, incorporate it naturally
-3. If web info exists, incorporate it naturally  
-4. Clearly note when info is general knowledge vs from sources
-5. Give helpful civic guidance (non-advisory)
-6. End with a brief disclaimer
+WEB SEARCH RESULTS (Adaptive Fallback):
+{web_text if web_text else 'None found.'}
 
-FORMAT YOUR RESPONSE WITH THESE SECTIONS:
+PAST CONVERSATION:
+{memory_context if memory_context else 'None.'}
 
-### Explanation
-(Clear, simple explanation of the topic)
+INSTRUCTIONS:
+1. Analyze the Intent and Sources.
+2. If sources are provided, ground your answer IN them.
+3. If no sources, use general knowledge but state that clearly.
+4. Explain simply and clearly.
 
-### What the Law Says
-(Legal provisions if found, or general legal framework)
+REQUIRED OUTPUT FORMAT:
 
-### Retrieved Information
-(Summary of database/web sources used, or skip if none)
+### Plain-language Explanation
+(Simple, clear answer)
 
-### What You Can Consider
-(Practical next steps - NOT legal advice)
+### What the law generally says
+(Legal principles/Acts mentioned in sources or general knowledge)
+
+### Evidence from database (if any)
+(Cite specific Internal DB documents used, or state "None")
+
+### Information from web (if any)
+(Cite Web results used, or state "None")
+
+### What you can consider
+(Practical civic guidance)
 
 ### Disclaimer
 (Brief legal disclaimer)"""
 
-        # Step 4: ONE LLM call
+        # Call LLM
         if groq_llm is None:
             logger.warning("LLM not available, returning context only")
             return _fallback_response(user_query, context)
-        
-        logger.info("💬 Calling LLM...")
+            
+        logger.info("💬 Generating Adaptive Response...")
         response = groq_llm.generate_response(
-            prompt=f"{system_prompt}\n\n{user_prompt}",
-            temperature=0.4,
-            max_tokens=1500
+            prompt=f"{system_prompt}\n\n{user_prompt}", 
+            temperature=0.3
         )
         
-        if not response or response.strip() == "":
-            logger.warning("Empty LLM response, using fallback")
-            return _fallback_response(user_query, context)
+        # Store interaction
+        _store_interaction(user_id, user_query, response)
         
-        logger.info("✓ LLM response received")
-        
-        # Step 5: Build final response
         return {
             "case_id": str(uuid.uuid4()),
             "query": user_query,
@@ -251,22 +234,21 @@ FORMAT YOUR RESPONSE WITH THESE SECTIONS:
             "sources": {
                 "database_docs": len(context["retrieved_docs"]),
                 "web_results": len(context["web_results"]),
-                "retrieval_status": context["retrieval_status"]
+                "source_type": context["context_source"],
+                "retrieval_status": "hit" if context["retrieved_docs"] else "miss"
             },
             "retrieved_docs": context["retrieved_docs"][:3],
             "web_results": context["web_results"][:3],
             "generated_at": datetime.now().isoformat()
         }
-        
+
     except Exception as e:
-        logger.error(f"Query error: {e}", exc_info=True)
+        logger.error(f"Pipeline Error: {e}")
         return {
-            "case_id": str(uuid.uuid4()),
-            "query": user_query,
-            "response": f"I apologize, but I encountered an error processing your question. Please try again.\n\nError: {str(e)}",
-            "sources": {"database_docs": 0, "web_results": 0, "retrieval_status": "error"},
-            "error": str(e),
-            "generated_at": datetime.now().isoformat()
+             "case_id": str(uuid.uuid4()),
+             "query": user_query, 
+             "response": "I encountered an error processing your request.",
+             "error": str(e)
         }
 
 
@@ -346,3 +328,100 @@ def _fallback_response(query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         "generated_at": datetime.now().isoformat(),
         "fallback": True
     }
+
+
+# =============================================================================
+# MEMORY & INTERACTION HISTORY LOGIC
+# =============================================================================
+
+def _init_memory_collection():
+    """Ensure user_interaction_memory collection exists."""
+    from database.qdrant_db import qdrant_manager
+    try:
+        qdrant_manager.create_collection(
+            collection_name="user_interaction_memory",
+            vector_size=384
+        )
+    except Exception as e:
+        logger.warning(f"Memory init warning: {e}")
+
+
+def _store_interaction(user_id: str, query: str, response: str):
+    """Store interaction in Qdrant with timestamp for long-term memory."""
+    from database.qdrant_db import qdrant_manager
+    from utils.embeddings import get_embedding
+    from qdrant_client.models import PointStruct
+    
+    try:
+        embedding = get_embedding(query)
+        doc_id = str(uuid.uuid4())
+        
+        payload = {
+            "user_id": user_id,
+            "query": query,
+            "response": response[:1000],  # Store truncated response
+            "timestamp": datetime.now().isoformat(),
+            "type": "interaction"
+        }
+        
+        qdrant_manager.client.upsert(
+            collection_name="user_interaction_memory",
+            points=[PointStruct(
+                id=doc_id,
+                vector=embedding,
+                payload=payload
+            )]
+        )
+        logger.debug("✓ Stored interaction in memory")
+    except Exception as e:
+        logger.error(f"Error storing interaction: {e}")
+
+
+def _get_memory_context(user_id: str, query: str, limit: int = 3) -> str:
+    """
+    Retrieve relevant past interactions for context.
+    
+    Implements:
+    1. Relevance Search: Finds semantically similar past Q&A
+    2. Recency Bias: Implicit in how LLM uses it (recent usually better)
+    3. Decay: Older irrelevant memories purely filtered by vector similarity
+    """
+    from database.qdrant_db import qdrant_manager
+    from utils.embeddings import get_embedding
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    
+    try:
+        embedding = get_embedding(query)
+        
+        # Filter by user_id
+        user_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="user_id",
+                    match=MatchValue(value=user_id)
+                )
+            ]
+        )
+        
+        results = qdrant_manager.client.search(
+            collection_name="user_interaction_memory",
+            query_vector=embedding,
+            query_filter=user_filter,
+            limit=limit,
+            score_threshold=0.6  # High threshold to only get relevant context
+        )
+        
+        if not results:
+            return ""
+            
+        memory_lines = ["Previous relevant discussions:"]
+        for r in results:
+            payload = r.payload
+            ts = payload.get("timestamp", "")[:10]  # Just date
+            memory_lines.append(f"- [{ts}] User: {payload.get('query')}")
+            memory_lines.append(f"  System: {payload.get('response')[:200]}...")
+            
+        return "\n".join(memory_lines)
+    except Exception as e:
+        logger.warning(f"Memory retrieval error: {e}")
+        return ""

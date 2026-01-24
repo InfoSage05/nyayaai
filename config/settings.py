@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     groq_api_key: Optional[str] = os.environ.get("GROQ_API_KEY")
     
     # Tavily Search Configuration
-    tavily_api_key: Optional[str] = os.environ.get("TAVILY_SEARCH_KEY")
+    tavily_api_key: Optional[str] = os.environ.get("TAVILY_API_KEY")
 
     # Embedding Model
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

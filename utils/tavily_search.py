@@ -87,10 +87,34 @@ class TavilySearch:
             # Perform search
             response = self.client.search(**search_params)
             
-            # Format results
+            # Debug: Log response type and content
+            logger.debug(f"Tavily response type: {type(response)}")
+            logger.debug(f"Tavily response keys: {response.keys() if isinstance(response, dict) else dir(response)}")
+            
+            # Format results - handle both dict and object responses
             results = []
-            if response and hasattr(response, 'results'):
-                for result in response.results:
+            
+            # Get results list (handle dict or object)
+            raw_results = []
+            if isinstance(response, dict):
+                raw_results = response.get("results", [])
+                answer = response.get("answer")
+            else:
+                raw_results = getattr(response, 'results', [])
+                answer = getattr(response, 'answer', None)
+            
+            for result in raw_results:
+                # Handle dict or object result items
+                if isinstance(result, dict):
+                    results.append({
+                        "title": result.get('title', ''),
+                        "url": result.get('url', ''),
+                        "content": result.get('content', ''),
+                        "score": result.get('score', 0.0),
+                        "published_date": result.get('published_date'),
+                        "raw_content": result.get('raw_content', '') if include_raw_content else None
+                    })
+                else:
                     results.append({
                         "title": getattr(result, 'title', ''),
                         "url": getattr(result, 'url', ''),
@@ -101,11 +125,11 @@ class TavilySearch:
                     })
             
             # Include AI-generated answer if available
-            if include_answer and hasattr(response, 'answer'):
+            if include_answer and answer:
                 results.insert(0, {
                     "title": "AI-Generated Answer",
                     "url": None,
-                    "content": response.answer,
+                    "content": answer,
                     "score": 1.0,
                     "published_date": None,
                     "raw_content": None,
@@ -135,20 +159,13 @@ class TavilySearch:
         Returns:
             List of legal information search results
         """
-        # Include legal domains
-        include_domains = [
-            "indiankanoon.org",
-            "legislative.gov.in",
-            "lawcommissionofindia.nic.in",
-            "judis.nic.in",
-            "main.sci.gov.in"
-        ]
-        
+        # Prefer legal domains but don't restrict exclusively
+        # This ensures we get results even if official sites don't have content
         return self.search(
-            query=query,
+            query=f"India law {query}",  # Add context for better results
             max_results=max_results,
             search_depth="advanced",
-            include_domains=include_domains,
+            include_domains=None,  # Don't restrict - get broader results
             include_answer=True,
             include_raw_content=False
         )

@@ -12,7 +12,7 @@ import requests
 from qdrant_client.models import PointStruct
 
 from utils.embeddings import get_embeddings
-from database.qdrant_client import qdrant_manager
+from database.qdrant_db import qdrant_manager
 from connectors.helpers import generic_ingest_url
 
 logger = logging.getLogger(__name__)

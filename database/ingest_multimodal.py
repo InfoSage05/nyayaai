@@ -26,9 +26,12 @@ import json
 import requests
 from bs4 import BeautifulSoup
 import re
+from sentence_transformers import SentenceTransformer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+from database.qdrant_db import qdrant_manager
 
 
 # Supported data types
@@ -650,7 +653,7 @@ def ingest_real_legal_data():
     # Ingest all data
     success_count = 0
     for item in all_data:
-        doc_id = ingest_document(**item, client=client)
+        doc_id = ingest_document(**item)
         if doc_id:
             success_count += 1
     
@@ -660,34 +663,18 @@ def ingest_real_legal_data():
 
 def create_multimodal_collection():
     """Create Qdrant collection for multimodal data with proper schema."""
-    from qdrant_client import QdrantClient
-    from qdrant_client.models import Distance, VectorParams
-    import os
-    
     collection_name = "multimodal_legal_data"
     
-    # Connect to Qdrant
-    host = os.environ.get("QDRANT_HOST", "localhost")
-    port = int(os.environ.get("QDRANT_PORT", "6333"))
-    client = QdrantClient(host=host, port=port)
-    
     try:
-        # Check if collection exists
-        collections = client.get_collections()
-        existing = [c.name for c in collections.collections]
-        
-        if collection_name in existing:
-            logger.info(f"Collection '{collection_name}' already exists")
-            return client
-        
-        # Create collection with 384-dim vectors (MiniLM)
-        client.create_collection(
+        # Use qdrant_manager to create the collection
+        success = qdrant_manager.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+            vector_size=384
         )
         
-        logger.info(f"✓ Created collection: {collection_name}")
-        return client
+        if success:
+            return qdrant_manager.client
+        return None
         
     except Exception as e:
         logger.error(f"Error creating collection: {e}")
@@ -698,42 +685,21 @@ def ingest_document(
     content: str,
     data_type: str,
     title: str,
-    source: str,
-    category: str,
+    source: str = "",
+    category: str = "",
     metadata: Optional[Dict[str, Any]] = None,
-    client = None
+    **kwargs # Sink extra arguments like client
 ) -> Optional[str]:
     """
-    Ingest a single document into the multimodal collection.
-    
-    Args:
-        content: Text content (or description for non-text)
-        data_type: One of: text, pdf, image, audio, video, code, form
-        title: Document title
-        source: Source/origin of the document
-        category: Legal category (constitutional, criminal, civil, etc.)
-        metadata: Additional metadata (file_path, url, duration, etc.)
-        client: QdrantClient instance
-    
-    Returns:
-        Document ID if successful, None otherwise
+    Ingest a single document into Qdrant.
     """
-    from sentence_transformers import SentenceTransformer
-    from qdrant_client import QdrantClient
     from qdrant_client.models import PointStruct
-    import os
     
     if data_type not in DATA_TYPES:
         logger.warning(f"Unknown data type: {data_type}, using 'text'")
         data_type = "text"
     
     try:
-        # Get or create client
-        if client is None:
-            host = os.environ.get("QDRANT_HOST", "localhost")
-            port = int(os.environ.get("QDRANT_PORT", "6333"))
-            client = QdrantClient(host=host, port=port)
-        
         # Generate embedding
         model = SentenceTransformer("all-MiniLM-L6-v2")
         embedding = model.encode(content[:1000]).tolist()
@@ -751,8 +717,8 @@ def ingest_document(
             **(metadata or {})
         }
         
-        # Upsert to Qdrant
-        client.upsert(
+        # Upsert to Qdrant using qdrant_manager
+        qdrant_manager.upsert_points(
             collection_name="multimodal_legal_data",
             points=[PointStruct(
                 id=doc_id,
@@ -960,7 +926,7 @@ def ingest_sample_multimodal_data():
     # Ingest all samples
     success_count = 0
     for sample in samples:
-        doc_id = ingest_document(**sample, client=client)
+        doc_id = ingest_document(**sample)
         if doc_id:
             success_count += 1
     
@@ -976,108 +942,102 @@ def search_multimodal(
 ) -> List[Dict[str, Any]]:
     """
     Search multimodal collection with optional filters.
-    
-    Args:
-        query: Search query text
-        data_type: Filter by data type (text, pdf, image, audio, video, code, form)
-        category: Filter by category (constitutional, criminal, civil, etc.)
-        limit: Maximum results to return
-    
-    Returns:
-        List of matching documents with scores
     """
     from sentence_transformers import SentenceTransformer
-    from qdrant_client import QdrantClient
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
-    import os
     
     try:
-        # Connect to Qdrant
-        host = os.environ.get("QDRANT_HOST", "localhost")
-        port = int(os.environ.get("QDRANT_PORT", "6333"))
-        client = QdrantClient(host=host, port=port)
-        
         # Generate query embedding
         model = SentenceTransformer("all-MiniLM-L6-v2")
         query_embedding = model.encode(query).tolist()
         
-        # Build filter
-        filter_conditions = []
+        # Build filter dict
+        filter_dict = {}
         if data_type:
-            filter_conditions.append(
-                FieldCondition(key="data_type", match=MatchValue(value=data_type))
-            )
+            filter_dict["data_type"] = data_type
         if category:
-            filter_conditions.append(
-                FieldCondition(key="category", match=MatchValue(value=category))
-            )
+            filter_dict["category"] = category
         
-        query_filter = None
-        if filter_conditions:
-            query_filter = Filter(must=filter_conditions)
-        
-        # Search
-        results = client.search(
+        # Search using qdrant_manager wrapper which uses query_points
+        results = qdrant_manager.search(
             collection_name="multimodal_legal_data",
             query_vector=query_embedding,
-            query_filter=query_filter,
-            limit=limit
+            limit=limit,
+            score_threshold=0.3, # Lower threshold for tests
+            filter_dict=filter_dict if filter_dict else None
         )
         
-        return [
-            {
-                "id": r.id,
-                "score": r.score,
-                "payload": r.payload
-            }
-            for r in results
-        ]
+        return results
         
     except Exception as e:
         logger.error(f"Search error: {e}")
         return []
 
 
-if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("MULTIMODAL DATA INGESTION FOR NYAYAAI")
-    print("="*60 + "\n")
+# =============================================================================
+# CONNECTOR INTEGRATION
+# =============================================================================
+
+try:
+    from connectors.indiacode_connector import ingest_act_from_url
+    from connectors.supremecourt_connector import ingest_judgment
+    from connectors.data_gov_connector import ingest_from_datagov_dataset
+except ImportError as e:
+    logger.warning(f"Could not import connectors: {e}")
+    ingest_act_from_url = None
+    ingest_judgment = None
+    ingest_from_datagov_dataset = None
+
+def ingest_from_connectors():
+    """Ingest data using specialized connectors for real-world sources."""
+    logger.info("🚀 Starting ingestion from external connectors...")
+
+    if not ingest_act_from_url:
+        logger.error("Connectors not available. Check imports.")
+        return
+
+    # 1. India Code (Example: RTI Act & IT Act)
+    acts = [
+        "https://www.indiacode.nic.in/handle/123456789/2065", # RTI Act default handle
+        "https://www.indiacode.nic.in/handle/123456789/1999"  # Information Technology Act
+    ]
+    for url in acts:
+        logger.info(f"Using IndiaCode connector for: {url}")
+        ingest_act_from_url(url, collection_name="unified_legal_vectors")
+
+    # 2. Supreme Court Judgments (Examples)
+    judgments = [
+        "https://main.sci.gov.in/supremecourt/2023/12345/judgment.pdf", # Placeholder real URL structure
+    ]
+    for url in judgments:
+        logger.info(f"Using Supreme Court connector for: {url}")
+        ingest_judgment(url, collection_name="unified_legal_vectors")
+
+    logger.info("✅ Connector ingestion complete.")
+
+def main():
+    print("Welcome to NyayaAI Multimodal Ingestion")
+    print("1. Ingest Sample Multimodal Data (Fast, Local)")
+    print("2. Ingest REAL Legal Data (India Code, Landmark Cases)")
+    print("3. Ingest via Connectors (Web Scraping - Slower)")
     
-    print("Choose data source:")
-    print("1. Real legal data (India Code, Landmark Cases, Forms, Videos)")
-    print("2. Sample multimodal data")
-    
-    choice = input("\nEnter choice (1 or 2, default=1): ").strip()
+    choice = input("Enter your choice (1/2/3) [default: 1]: ").strip()
     
     if choice == "2":
-        count = ingest_sample_multimodal_data()
+        ingest_real_legal_data()
+    elif choice == "3":
+        ingest_from_connectors()
     else:
-        count = ingest_real_legal_data()
-    
-    # Test search
-    print("\n" + "-"*60)
-    print("Testing multimodal search...")
-    print("-"*60)
-    
-    # Test 1: General search
-    results = search_multimodal("How to file RTI", limit=3)
-    print(f"\n🔍 Search: 'How to file RTI' -> {len(results)} results")
-    for r in results:
-        print(f"  [{r['payload'].get('data_type')}] {r['payload'].get('title')} (score: {r['score']:.3f})")
-    
-    # Test 2: Search for cases
-    results = search_multimodal("privacy fundamental right", limit=3)
-    print(f"\n🔍 Search: 'privacy fundamental right' -> {len(results)} results")
-    for r in results:
-        print(f"  [{r['payload'].get('data_type')}] {r['payload'].get('title')}")
-    
-    # Test 3: Filter by category
-    results = search_multimodal("rights", category="constitutional", limit=3)
-    print(f"\n🔍 Search: 'rights' (constitutional category) -> {len(results)} results")
-    for r in results:
-        print(f"  [{r['payload'].get('data_type')}] {r['payload'].get('title')}")
-    
-    print("\n" + "="*60)
-    print("✅ Multimodal ingestion complete!")
-    print("="*60 + "\n")
+        ingest_sample_multimodal_data()
 
+    # Test Search
+    print("\n🔎 Running Test Queries...")
+    results = search_multimodal("RTI application process")
+    for r in results:
+        print(f"- [{r['score']:.2f}] {r['payload'].get('title', 'No Title')} ({r['payload'].get('data_type')})")
+
+    results_v = search_multimodal("courtroom argument audio", data_type="audio")
+    for r in results_v:
+        print(f"- [{r['score']:.2f}] {r['payload'].get('title', 'No Title')} ({r['payload'].get('data_type')})")
+
+if __name__ == "__main__":
+    main()

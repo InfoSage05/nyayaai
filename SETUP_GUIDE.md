@@ -42,6 +42,9 @@ For detailed instructions, see the complete guide below.
 3. **Groq API Key** - For LLM inference (cloud-based, free tier available)
    - Sign up at: https://console.groq.com
    - Get your API key from the dashboard
+4. **TAVILY API Key** - For web search (cloud-based, free tier available)
+   - Sign up at: https://tavily.com
+   - Get your API key from the dashboard
 
 ## Step-by-Step Setup
 
@@ -94,16 +97,12 @@ pip install -e .
 
 ### 4. Configure Environment Variables
 
-**Create/Update `.env` file in the project root:**
-
-```bash
 # Windows (PowerShell)
 echo "GROQ_API_KEY=your_actual_groq_api_key_here" > .env
+echo "TAVILY_API_KEY=your_actual_tavily_api_key_here" > .env
 ```
 
 Or manually create `.env` file with:
-```
-GROQ_API_KEY=your_actual_groq_api_key_here
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 ```

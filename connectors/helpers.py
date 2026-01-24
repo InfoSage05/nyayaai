@@ -6,7 +6,7 @@ from typing import List, Optional
 import requests
 from qdrant_client.models import PointStruct
 
-from database.qdrant_client import qdrant_manager
+from database.qdrant_db import qdrant_manager
 from utils.embeddings import get_embeddings
 
 logger = logging.getLogger(__name__)

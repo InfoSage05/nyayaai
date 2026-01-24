@@ -51,7 +51,7 @@ The system now offers two pipelines:
 
 - Docker & Docker Compose
 - Python 3.11+
-- Ollama installed locally
+- Groq API and Tavily Search API
 
 ### Setup
 
