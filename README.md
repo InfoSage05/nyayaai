@@ -6,44 +6,46 @@ Legal rights and civic remedies in India exist on paper, but are inaccessible in
 
 ## Solution Overview
 
-NyayaAI is a multi-agent AI system that uses Qdrant vector search to provide:
-- **Search**: Semantic retrieval of legal statutes, case law, and civic processes
-- **Memory**: Long-term case memory and user interaction history
-- **Recommendations**: Context-aware civic action recommendations
+NyayaAI is a legal AI assistant powered by **Adaptive RAG** (Retrieval-Augmented Generation) that provides:
+- **Hybrid Search**: Combines internal vector database (Qdrant) + real-time web search (Tavily)
+- **Evidence-Based Answers**: All responses cite sources from retrieved documents
+- **Semantic Memory**: Long-term conversation context using vector similarity
+- **Multimodal Support**: Processes text, PDFs, images, audio, video, code, and legal forms
 
 ## Architecture
 
-The system now offers two pipelines:
+### Adaptive RAG Pipeline (Default)
 
-1.  **Simplified Pipeline (Recommended)**:
-    *   **Architecture**: RAG (Qdrant) + Web Search (Tavily) + ONE LLM Call (Groq)
-    *   **Features**:
-        *   **Multimodal Retrieval**: Searches Text, PDF, Images, Audio, Video, Code, and Forms
-        *   **Fast**: Single LLM call ensures low latency (~2-3s)
-        *   **Reliable**: No complex agent chaining failures
-        *   **Clear**: Displays source-grounded answers directly
+```
+Query → Embedding → Qdrant Search → Web Search (Tavily) → Combined Context → LLM (Groq) → Response
+```
 
-2.  **Legacy Multi-Agent Pipeline (Advanced)**:
-    *   Complex LangGraph orchestration with 8 specialized agents
-    *   Best for deep research requiring multi-step reasoning
+**Key Features:**
+- **Parallel Retrieval**: Database AND web search run together (not fallback)
+- **Smart Collection Search**: Tries multiple collections (`multimodal_legal_data`, `legal_taxonomy_vectors`, etc.)
+- **Low Latency**: Single LLM call (~2-3s response time)
+- **Source Transparency**: Clearly labels database vs web sources
+- **Conversation Memory**: Stores interactions for context continuity
 
 ## Key Features
 
-*   **Multimodal Search**: Retrieve laws, cases, forms, and educational videos in one go.
-*   **Real Legal Data**: Includes statutes (India Code), landmark judgments (Supreme Court), and official forms.
-*   **Simple & Fast**: Designed for immediate, helpful answers without agent overhead.
-*   **Semantic Search**: Qdrant vector database understands legal context.
-*   ** Civic Guidance**: Provides practical "Next Steps" alongside legal info.
+*   **Adaptive RAG**: Combines internal knowledge + web search for comprehensive answers
+*   **Real Legal Data**: India Code statutes, Supreme Court judgments, RTI forms
+*   **Multimodal Ingestion**: Supports text, PDF, images, audio, video, and code
+*   **Evidence-Based Outputs**: LLM responses cite specific sources
+*   **Semantic Search**: Qdrant vector database with 384-dim embeddings
+*   **Civic Guidance**: Practical next steps alongside legal information
 
 ## Tech Stack
 
 - **Backend**: Python 3.11+, FastAPI
-- **Pipeline**: Simplified RAG + Multi-Modal Qdrant
-- **Vector DB**: Qdrant (Docker) - Stores Text, Audio, Video metadata
+- **Pipeline**: Adaptive RAG with parallel retrieval
+- **Vector DB**: Qdrant (Docker) - 384-dim embeddings (MiniLM)
+- **LLM**: Groq (Llama3-70b/8b) - Fast cloud inference
+- **Web Search**: Tavily API - Real-time legal information
 - **Embeddings**: SentenceTransformers (all-MiniLM-L6-v2)
-- **LLM**: Groq (Llama3-70b/8b) - Fast inference
-- **Web Search**: Tavily API
 - **Frontend**: Streamlit
+- **Data Connectors**: India Code, Supreme Court, Data.gov.in
 
 ## Quick Start
 
@@ -104,12 +106,9 @@ streamlit run nyayaai/frontend/app.py
 
 ## Qdrant Collections
 
-1. `legal_taxonomy_vectors` - Legal domain taxonomy
-2. `statutes_vectors` - Legal statutes and acts
-3. `case_law_vectors` - Case law and judgments
-4. `civic_process_vectors` - Civic processes and procedures
-5. `case_memory_vectors` - Long-term case memory
-6. `user_interaction_memory` - User interaction history
+1. `multimodal_legal_data` - Main collection with all ingested legal data (text, PDF, audio, video, forms)
+2. `legal_taxonomy_vectors` - Legal domain taxonomy
+3. `user_interaction_memory` - Semantic conversation memory for context
 
 ## API Endpoints
 

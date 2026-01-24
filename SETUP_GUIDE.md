@@ -97,17 +97,30 @@ pip install -e .
 
 ### 4. Configure Environment Variables
 
-# Windows (PowerShell)
-echo "GROQ_API_KEY=your_actual_groq_api_key_here" > .env
-echo "TAVILY_API_KEY=your_actual_tavily_api_key_here" > .env
-```
+Create a `.env` file in the project root with your API keys:
 
-Or manually create `.env` file with:
+```bash
+# Windows (PowerShell) - Create all at once
+@"
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
+GROQ_API_KEY=your_actual_groq_api_key_here
+TAVILY_API_KEY=your_actual_tavily_api_key_here
+"@ | Out-File -Encoding utf8 .env
 ```
 
-**Important**: Replace `your_actual_groq_api_key_here` with your actual Groq API key from Step 1.
+Or manually create/edit `.env` file:
+```
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+GROQ_API_KEY=gsk_your_groq_key
+TAVILY_API_KEY=tvly-your_tavily_key
+```
+
+**Important**: 
+- Get your Groq API key from https://console.groq.com
+- Get your Tavily API key from https://tavily.com
+- Both keys are required for full functionality (LLM + Web Search)
 
 ### 5. Initialize & Ingest Real Data (Recommended)
 
